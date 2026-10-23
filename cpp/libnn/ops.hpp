@@ -9,3 +9,5 @@
 #include "rms_norm.hpp"
 #include "rope.hpp"
 #include "softmax.hpp"
+
+#include "linear_fp4.hpp"

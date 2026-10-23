@@ -138,6 +138,31 @@ class LinearLowerer(OpLowerer):
         return LoweredNode((self.output(node.outputs[0], out_shape),), "linear", node.args, attrs)
 
 
+class LinearFP4Lowerer(OpLowerer):
+    def lower(self, node, tensors, weights):
+        from nnc.fp4 import pack_slots
+        x, q, scale = (tensors.require(name) for name in node.args)
+        if len(q.shape) != 2 or x.shape != (1, q.shape[1]):
+            raise SystemExit("FP4 Linear currently requires a single token [1,K]")
+        n, k = q.shape
+        if n <= 0 or k <= 0 or n % 8 or k % 32 or scale.shape != (n, k // 32):
+            raise SystemExit("FP4 Linear requires N%8=0, K%32=0, scales[N,K/32]")
+        if ((2*k+63)//64*64 + (2*n+63)//64*64 + 4*144) > 32768:
+            raise SystemExit("FP4 Linear operands exceed DTCM scratch capacity")
+        if q.target not in weights.parameters or scale.target not in weights.parameters:
+            raise SystemExit("FP4 weight and scale must be static parameters")
+        payload = pack_slots(weights.parameters[q.target], weights.parameters[scale.target])
+        packed = TensorSpec(q.name + "_" + scale.name + "_fp4_slots", (len(payload),), "synthetic")
+        # A previous BF16 constant need not end on a DMA beat boundary.
+        if packed.name not in weights.records:
+            padding = (-weights.cursor) % 16
+            weights.data.extend(bytes(padding))
+            weights.cursor += padding
+            weights.use_payload(packed, payload, "uint8_t")
+        return LoweredNode((self.output(node.outputs[0], (1, n)),),
+                           "linear_fp4", (x.name,), {"packed": packed.name, "n": str(n)})
+
+
 class RopeLowerer(OpLowerer):
     def lower(self, node: GraphNode, tensors: TensorTable, weights: WeightStore) -> LoweredNode:
         xq = self.static_or_dynamic(tensors, node.args[0])
@@ -221,6 +246,7 @@ class MatmulLowerer(OpLowerer):
 OP_LOWERERS: dict[str, OpLowerer] = {
     "rms_norm": RmsNormLowerer(),
     "linear": LinearLowerer(),
+    "linear_fp4": LinearFP4Lowerer(),
     "rope": RopeLowerer(),
     "kv_cache_update": KvCacheLowerer(),
     "attention": AttentionLowerer(),

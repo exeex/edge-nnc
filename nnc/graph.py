@@ -116,6 +116,7 @@ def export_graph(model: Any, args: tuple[Any, ...]) -> Graph:
 
 class ExportGraphReader:
     OP_TARGETS = {
+        ("nnedge::linear_fp4", "default"): "linear_fp4",
         ("nnedge::rms_norm", "default"): "rms_norm",
         ("nnedge::linear", "default"): "linear",
         ("nnedge::rope", "default"): "rope",
