@@ -1,0 +1,56 @@
+# Llama NNC example
+
+This example exports the tiny Llama 3 transformer block in
+`model/llama3_source.py`, lowers it through `nnc/compiler.py`,
+links the generated weights and example inputs into a bare-metal RISC-V image, and checks the
+consumer-provided Verilator output against PyTorch.
+
+```sh
+uv sync --extra cpu
+PYTHON=.venv/bin/python ./example/llama/run.sh \
+  --edge32-include /path/to/edge-32/include --sim-exe /path/to/simulator
+```
+
+Pass another model with `--model-file`, or generate and build without running
+the simulator with `./example/llama/build.sh`. Compiler regression models live
+under `nnc/test/`; this example intentionally contains only the user-facing
+Llama source model.
+
+The CPU extra installs the locked Python dependencies. Set `PYTHON=/path/to/python` only when intentionally
+using another virtual environment.
+
+Profile every lowered node in the complete tiny Llama transformer block:
+
+```sh
+./example/llama/profile.sh --edge32-include /path/to/edge-32/include --sim-exe /path/to/simulator
+```
+
+The profiling smoke compiles `model/llama3_source.py` directly, checks its BF16
+result against PyTorch, and writes
+`profile.md`, `profile.tsv`, and `software-console.log` below
+`example/llama/build/llama3_source/`.
+
+Run every `nnc/test/smoke_*.py` case and the copied `llama3_source.py`
+profiling case:
+
+```sh
+./example/llama/test.sh --edge32-include /path/to/edge-32/include --sim-exe /path/to/simulator
+```
+
+The suite writes its summary to `example/llama/build/harness/harness.md` and
+keeps one log per model in the same directory.
+
+Generated headers, weights, binaries, and logs are written below
+`example/llama/build/` and are not source files.
+
+The compiler is split by responsibility: `nnc/graph.py` reads the PyTorch
+export and forward ABI, `nnc/lowering.py` maps graph operations to kernels,
+`nnc/weights.py` packs static data, `nnc/liveness.py` finds temporary tensor
+last uses, and `nnc/codegen.py` renders the C++ headers. `nnc/compiler.py`
+provides the command-line entry point and writes the artifacts.
+
+The generated `weight.bin` and `input.bin` are linked into `.nnedge_weights`
+and `.nnedge_inputs`. `init.hpp` binds tensors using each section's start
+address plus the compiler's offset. Output storage lives in the ELF's
+`.nnedge_outputs` section at the runner's `--output-base` address (default
+`0x100000`).
