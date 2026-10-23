@@ -21,19 +21,25 @@ Compared with 512 bytes of BF16 weights per group, the ratio is 3.56x including
 scale. Public tensors remain contiguous; the packed payload is Tensor<uint8_t>.
 
 The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
-eight scales, a four-slot circular ring and dtype=0 for BF16 partial sums.
-Each tile computes `P_next = BF16(P + scale * dot(x, q))`; only the first K tile
-uses NO_PSUM. WSLD owns weight and scale tokens. One start consumes one tile.
-The Python reference accumulates dot products in FP32 and rounds PSUM to BF16
-between tiles. It is a numerical reference, not a bit-true model of the RTL's
-internal reduced precision; RTL comparisons therefore report numerical error.
+eight scales and a four-slot circular ring. Tile mode stores intermediate
+PSUM as BF22 in FP32 words: first tile skips P, middle tiles read/write P,
+and the last tile reads P and writes BF16. The runtime reserves one private
+128-byte four-vector stripe (only vector zero is used); its two halves are
+64 bytes apart for the +4-channel gearbox.
+
+Each tile computes `R22(P + R22(scale * R22(dot(x,q))))`. WSLD owns weight
+and scale tokens; one start consumes one tile. Only the final output is
+rounded to BF16. Python supplies a normal-range numerical reference with
+these precision boundaries; it is not a bit-true model of dot alignment or
+exceptional-value hardware behavior.
 
 Initial supported shapes: x[1,K], q[N,K], K a positive multiple of 32, N a
 positive multiple of 8; weights/scales must be static. The compiler rejects
 multiple tokens and operands exceeding the 32 KiB scratch budget. Runtime
 handles DTCM operands directly; external operands are staged via DMA before or
 after circular loading. Multi-token batching and group sizes other than 32
-are future work. No change to hardware is required by this implementation.
+are future work. This version requires the E3 BF22 P/O extension; older RTL
+that stores `{bf16,16'b0}` loses the extra precision.
 
 Validation:
 
@@ -50,7 +56,7 @@ for the external path additionally use `--main-file nnc/test/fp4_dram_main.cpp`.
 Keep RTL error versus this quantized reference separate from quantization
 error versus the original unquantized model.
 
-## E3 validation checkpoint (2026-10-23)
+## Initial BF16-PSUM validation checkpoint (2026-10-23)
 
 Consumer n906 baseline `1edc8673`; NNC baseline `a8659e3` plus this change.
 Python 3.12, PyTorch 2.13.0, Verilator 5.050; no RTL changes.
@@ -68,3 +74,12 @@ remain 0.05; the exact fixtures had zero error. Cycle counts include startup
 and software overhead; the external IO entry point omits the generated
 forward's allocations and extra copy, so these are not kernel-only comparisons.
 Local consumer logs: `build/nnc-fp4/suite` and `build/nnc-fp4/dram`.
+
+## BF22 P/O validation
+
+The K128/N24 ring-wrap case now matches the BF22 numerical reference exactly
+(12,509 whole-program cycles). K32/N8 and K64/N16 remain exact. The added
+`smoke_linear_fp4_precision.py` accumulates 1+31*2^-12 across 32 tiles and
+returns BF16 1.0078125; the old per-tile BF16 PSUM would return 1.0. This case
+passes with zero tolerance. The full 25-model suite passes; direct external input/output also matches
+exactly (10,997 whole-program cycles). Compiler/packing/reference tests: 15/15.

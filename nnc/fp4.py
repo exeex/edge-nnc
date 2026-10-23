@@ -64,15 +64,22 @@ def pack_slots(q, scale):
     return bytes(payload)
 
 
+def round_bf22(value):
+    raw = value.contiguous().float().view(torch.int32).to(torch.int64) & 0xffffffff
+    rounded = ((raw + 0x1ff + ((raw >> 10) & 1)) & 0xfffffc00).to(torch.int32)
+    return rounded.view(torch.float32)
+
+
 @torch.library.custom_op('nnedge::linear_fp4', mutates_args=())
 def linear_fp4(x: torch.Tensor, q: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    # FP32 arithmetic on BF16-carried FP4 values, scale after each dot tile.
-    # BF16 PSUM storage rounds between tiles just like the current runtime.
+    # Normal-range numerical reference: BF22 dot, multiply, and partial sum.
+    # Public output is rounded to BF16 only after the final tile.
     result = torch.zeros((*x.shape[:-1], q.shape[0]), device=x.device)
     for offset in range(0, q.shape[1], 8):
         dot = x[..., offset:offset+8].float() @ q[:, offset:offset+8].float().T
-        result = (result + dot * scale[:, offset // 32].float()).to(torch.bfloat16).float()
-    return result.to(x.dtype)
+        scaled = round_bf22(round_bf22(dot) * scale[:, offset // 32].float())
+        result = round_bf22(result + scaled)
+    return result.to(torch.bfloat16).to(x.dtype)
 
 
 @linear_fp4.register_fake

@@ -147,7 +147,7 @@ class LinearFP4Lowerer(OpLowerer):
         n, k = q.shape
         if n <= 0 or k <= 0 or n % 8 or k % 32 or scale.shape != (n, k // 32):
             raise SystemExit("FP4 Linear requires N%8=0, K%32=0, scales[N,K/32]")
-        if ((2*k+63)//64*64 + (2*n+63)//64*64 + 4*144) > 32768:
+        if ((2*k+63)//64*64 + (2*n+63)//64*64 + 128 + 4*144) > 32768:
             raise SystemExit("FP4 Linear operands exceed DTCM scratch capacity")
         if q.target not in weights.parameters or scale.target not in weights.parameters:
             raise SystemExit("FP4 weight and scale must be static parameters")

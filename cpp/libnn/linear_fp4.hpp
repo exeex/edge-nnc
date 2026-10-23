@@ -20,7 +20,7 @@ inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
     const size_t count = (n/8)*(k/L::group_k);
     if (x.shape.rank != 2 || y.shape.rank != 2 || x.shape.dims[0] != 1 ||
         y.shape.dims[0] != 1 || !k || !n || k%32 || n%8 ||
-        xb+yb+L::ring_slots*L::slot_bytes > kDtcmOpScratchBytes ||
+        xb+yb+128+L::ring_slots*L::slot_bytes > kDtcmOpScratchBytes ||
         numel(slots) != count*L::slot_bytes || !x.data || !y.data || !slots.data)
         return false;
     auto *scratch = dtcm_op_scratch<unsigned char>();
@@ -30,22 +30,25 @@ inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
     else copy(xs, x); // Finish staging before leasing circular DMA.
     if (is_dtcm_addr(y.data)) ys = y;
     if (alloc_failed()) return false;
-    edge_tensor_setcsr<0, L::wtype>(); // BF16 partial sums, packed FP4 weights.
+    auto *psum = scratch+xb+yb; // L0 at +0, H0 at +64; reserve full striped group.
+    edge_tensor_setcsr<0, L::wtype>(); // Tile mode selects BF22-in-FP32 P/O.
     edge_tensor_setn(1);
     edge_dcache_clean_range(slots.data, count*L::slot_bytes);
-    edge_dma_start_strided_circular(slots.data, scratch+xb+yb,
+    edge_dma_start_strided_circular(slots.data, psum+128,
         L::slot_bytes, L::slot_bytes, count, 0u, 1u,
         L::slot_bytes, L::ring_slots);
     edge_tensor_wsld_circular<L::transpose,L::tiles,L::wtype,L::scales,L::stype>();
     for (size_t ob=0; ob<n/8; ++ob) {
         for (size_t kb=0; kb<k/8; ++kb) {
             edge_tensor_setin(xs.data+kb*8);
-            edge_tensor_setout(ys.data+ob*8);
+            const bool last = kb+1 == k/8;
+            edge_tensor_setout(last ? (void *)(ys.data+ob*8) : (void *)psum);
             if (kb==0) {
-                edge_tensor_start<EDGE_TENSOR_START_OPT_USE_SCALE | EDGE_TENSOR_START_OPT_NO_PSUM>();
+                edge_tensor_start<EDGE_TENSOR_START_OPT_USE_SCALE | EDGE_TENSOR_START_FIRST_TILE>();
             } else {
-                edge_tensor_setpsum(ys.data+ob*8);
-                edge_tensor_start<EDGE_TENSOR_START_OPT_USE_SCALE>();
+                edge_tensor_setpsum(psum);
+                if(last) edge_tensor_start<EDGE_TENSOR_START_OPT_USE_SCALE | EDGE_TENSOR_START_LAST_TILE>();
+                else edge_tensor_start<EDGE_TENSOR_START_OPT_USE_SCALE | EDGE_TENSOR_START_PSUM_TILE>();
             }
         }
     }

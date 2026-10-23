@@ -42,6 +42,16 @@ class FP4Test(unittest.TestCase):
                     expected = q[ob*8:ob*8+8,g*32+tile*8:g*32+tile*8+8]
                     self.assertEqual(decoded, expected.flatten().tolist())
 
+    def test_bf22_partial_sums_keep_small_contributions(self):
+        from nnc.test.smoke_linear_fp4_precision import make_model_and_args
+        model,args = make_model_and_args()
+        actual = model(*args)
+        self.assertTrue(torch.equal(actual, torch.full_like(actual, 1.0078125)))
+        narrow = torch.tensor(1., dtype=torch.bfloat16)
+        for _ in range(31):
+            narrow = (narrow.float() + 2**-12).to(torch.bfloat16)
+        self.assertEqual(float(narrow), 1.)
+
     def test_compilation_and_reject_multi_token(self):
         from pathlib import Path
         model,args = compiler.load_model_example(Path(__file__).parent/'test/smoke_linear_fp4.py')

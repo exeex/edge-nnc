@@ -20,8 +20,8 @@ linker memory map in `cpp/baremetal/linker.ld` (at least 6 MiB external RAM).
 `nnc/run_harness.py` runs all smoke fixtures and the small Llama fixture.
 
 The runtime supports BF16 Linear and a single-token FP4 + BF16-scale Linear
-through WSLD; see [FP4_LINEAR.md](FP4_LINEAR.md). FP8 lowering is not implemented. Runtime PSUM tensors use BF16 storage and select E3
-`dtype=0`. E3 `dtype=1` reads FP32 PSUM and cannot be used with those tensors.
+through WSLD; see [FP4_LINEAR.md](FP4_LINEAR.md). FP8 lowering is not implemented. Ordinary BF16 operators use BF16 PSUM with `dtype=0`. FP4 Linear uses the
+E3 BF22-in-FP32 tile-mode PSUM path and rounds only the final output to BF16.
 
 Canonical repository: https://github.com/exeex/edge-nnc.
 Consuming workspaces can pin this compiler/runtime pair as a Git submodule.
