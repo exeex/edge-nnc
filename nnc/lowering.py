@@ -132,6 +132,14 @@ class LinearLowerer(OpLowerer):
     def lower(self, node: GraphNode, tensors: TensorTable, weights: WeightStore) -> LoweredNode:
         x = self.static_or_dynamic(tensors, node.args[0])
         weight = self.static_or_dynamic(tensors, node.args[1])
+        if len(x.shape) != 2 or len(weight.shape) != 2:
+            raise SystemExit("BF16 Linear requires rank-2 input and weight")
+        if min(*x.shape, *weight.shape) <= 0 or x.shape[1] != weight.shape[1]:
+            raise SystemExit("BF16 Linear requires positive matching K dimensions")
+        if x.shape[1] % 8 or weight.shape[0] % 8:
+            raise SystemExit("BF16 Linear requires K%8=0 and N%8=0")
+        if weight.target not in weights.parameters:
+            raise SystemExit("BF16 Linear weight must be a static parameter")
         weights.use(weight)
         out_shape = (*x.shape[:-1], weight.shape[0])
         attrs = {"quant": "bf16", "tile": "auto", **node.attrs}
@@ -223,15 +231,28 @@ class MatmulLowerer(OpLowerer):
         head_count = int(node.attrs.get("head_count", "1"))
         if head_count <= 0:
             raise SystemExit("matmul head_count must be positive")
+        if len(rhs.shape) != 2 or len(lhs.shape) not in ((2,) if self.rhs_transposed else (2, 3)):
+            raise SystemExit("matmul requires rank-2 RHS and rank-2 or explicit-head rank-3 LHS")
+        if min(*lhs.shape, *rhs.shape) <= 0:
+            raise SystemExit("matmul dimensions must be positive")
         if self.rhs_transposed:
-            if lhs.shape[1] % head_count != 0:
-                raise SystemExit("matmul_transpose width must be divisible by head_count")
-            out_shape = (head_count, lhs.shape[0], rhs.shape[0])
+            if lhs.shape[1] % head_count or rhs.shape[1] != lhs.shape[1]:
+                raise SystemExit("matmul_transpose requires matching widths divisible by head_count")
+            rows, k, n = lhs.shape[0], lhs.shape[1] // head_count, rhs.shape[0]
+            out_shape = (head_count, rows, n)
         else:
-            if rhs.shape[1] % head_count != 0:
+            if rhs.shape[1] % head_count:
                 raise SystemExit("matmul output width must be divisible by head_count")
-            rows = lhs.shape[1] if len(lhs.shape) >= 3 else lhs.shape[0]
+            if len(lhs.shape) == 3 and lhs.shape[0] != head_count:
+                raise SystemExit("matmul LHS head axis must match head_count")
+            rows, k, n = lhs.shape[-2], lhs.shape[-1], rhs.shape[1] // head_count
+            if rhs.shape[0] != k:
+                raise SystemExit("matmul K dimensions must match")
             out_shape = (rows, rhs.shape[1])
+        if k % 8 or n % 8:
+            raise SystemExit("matmul requires K%8=0 and per-head N%8=0")
+        if 2 * head_count * (rows * n + rows * k + k * n) > 32768:
+            raise SystemExit("matmul operands exceed 32 KiB DTCM scratch capacity")
         return LoweredNode(
             (self.output(node.outputs[0], out_shape),),
             "matmul_transpose" if self.rhs_transposed else "matmul",

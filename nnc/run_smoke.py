@@ -80,6 +80,8 @@ def build(args: argparse.Namespace, generated_dir: Path, build_dir: Path) -> Non
         "-o", str(build_dir / "crt0.o"),
     ], check=True)
     profile = ["-DNNEDGE_PROFILE=1"] if args.profile else []
+    if args.phase_profile:
+        profile.append("-DNNEDGE_PHASE_PROFILE=1")
     subprocess.run([
         clangxx, *target, "-std=c++17", "-ffreestanding", "-fno-builtin",
         "-fno-exceptions", "-fno-rtti", "-fno-pic", "-fno-pie", "-O2",
@@ -210,6 +212,7 @@ def run(args: argparse.Namespace, build_dir: Path, expected: tuple[int, ...]) ->
         f"+dump_base={args.output_base}", f"+dump_len={len(expected) * 2}",
         f"+dump_file={dump}", f"+run_case_report={build_dir / 'run_case.report'}",
     ]
+    command.extend(args.sim_arg)
     result = subprocess.run(command, text=True, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
     (build_dir / "software-console.log").write_text(result.stdout, encoding="utf-8")
@@ -229,10 +232,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--phase-profile", action="store_true",
+                        help="enable intrusive runtime phase diagnostics (included in op time)")
     parser.add_argument("--output-base", type=lambda text: int(text, 0), default=0x100000)
     parser.add_argument("--max-cycles", type=int, default=5000000)
     parser.add_argument("--max-abs-error", type=float, default=0.05)
     parser.add_argument("--sim-exe")
+    parser.add_argument("--sim-arg", action="append", default=[],
+                        help="extra simulator argument; repeat for multiple plusargs")
     parser.add_argument("--sim-build-script", type=Path)
     parser.add_argument("--edge32-include", type=Path,
                         default=Path(os.environ.get("EDGE32_INCLUDE", str(REPO_ROOT.parent.parent / "src/edge-32/include"))))

@@ -25,3 +25,15 @@ E3 BF22-in-FP32 tile-mode PSUM path and rounds only the final output to BF16.
 
 Canonical repository: https://github.com/exeex/edge-nnc.
 Consuming workspaces can pin this compiler/runtime pair as a Git submodule.
+
+For operator cycle counts, pass `--profile` to `nnc/run_smoke.py`. Runtime
+phase diagnostics are opt-in with `--phase-profile`; their console cost is
+included in operator timings, so use separate runs for phase diagnosis.
+Pass simulator options with repeatable `--sim-arg` (for example
+`--sim-arg +profile_mac` on the composed E3 harness).
+
+BF16 Linear currently accepts static weights and rank-two inputs with K/N
+multiples of eight; M may have a tail. Matmul implements the head-aware
+normal/transposed layouts used by NNC, with per-head K/N multiples of eight
+and a 32 KiB staging limit. Unsupported shapes are rejected during lowering.
+These contracts do not cover general PyTorch broadcasting or arbitrary K/N tails.

@@ -24,8 +24,9 @@ The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
 eight scales and a four-slot circular ring. Tile mode stores intermediate
 PSUM as BF22 in FP32 words: first tile skips P, middle tiles read/write P,
 and the last tile reads P and writes BF16. The runtime reserves one private
-128-byte four-vector stripe (only vector zero is used); its two halves are
-64 bytes apart for the +4-channel gearbox.
+128-byte region (only vector zero is used). The current E3 wide P/O layout
+uses eight contiguous FP32 containers in its first 32 bytes. The legacy
++4-channel configuration instead places the two 16-byte halves 64 bytes apart.
 
 Each tile computes `R22(P + R22(scale * R22(dot(x,q))))`. WSLD owns weight
 and scale tokens; one start consumes one tile. Only the final output is

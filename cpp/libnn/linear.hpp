@@ -29,7 +29,9 @@ template <bool InputDram, bool OutputDram>
 inline void linear_impl(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                         Tensor<bfloat16_t> weight)
 {
+#ifdef NNEDGE_PHASE_PROFILE
     edge_sim_printf("NNC_PHASE linear_begin\n");
+#endif
     constexpr size_t kTokenTile = 32u;
     const size_t rows = x.shape.dims[0];
     const size_t in_cols = x.shape.dims[1];
@@ -146,7 +148,9 @@ inline void linear_impl(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
             }
         }
     }
+#ifdef NNEDGE_PHASE_PROFILE
     edge_sim_printf("NNC_PHASE linear_end\n");
+#endif
 }
 
 inline void linear(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x, Tensor<bfloat16_t> weight,

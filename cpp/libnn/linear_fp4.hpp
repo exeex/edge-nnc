@@ -30,7 +30,7 @@ inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
     else copy(xs, x); // Finish staging before leasing circular DMA.
     if (is_dtcm_addr(y.data)) ys = y;
     if (alloc_failed()) return false;
-    auto *psum = scratch+xb+yb; // L0 at +0, H0 at +64; reserve full striped group.
+    auto *psum = scratch+xb+yb; // Reserve 128 B for both contiguous wide P/O and legacy striped P/O.
     edge_tensor_setcsr<0, L::wtype>(); // Tile mode selects BF22-in-FP32 P/O.
     edge_tensor_setn(1);
     edge_dcache_clean_range(slots.data, count*L::slot_bytes);

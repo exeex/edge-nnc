@@ -250,5 +250,54 @@ class InitRendererTest(unittest.TestCase):
         self.assertNotIn("dtype::from_bits", rendered)
 
 
+
+class LinearMatmulShapeContractTest(unittest.TestCase):
+    def linear(self, x, w, source="weight"):
+        tensors = compiler.TensorTable()
+        tensors.add(compiler.TensorSpec("x", x, "input"))
+        tensors.add(compiler.TensorSpec("w", w, source, "w" if source == "weight" else ""))
+        return compiler.LinearLowerer().lower(
+            compiler.GraphNode(("y",), "linear", ("x", "w")), tensors,
+            compiler.WeightStore({"w": torch.ones(w)}))
+
+    def matmul(self, lhs, rhs, heads=1, transpose=False):
+        tensors = compiler.TensorTable()
+        tensors.add(compiler.TensorSpec("a", lhs, "input"))
+        tensors.add(compiler.TensorSpec("b", rhs, "input"))
+        return compiler.MatmulLowerer(transpose).lower(
+            compiler.GraphNode(("y",), "matmul", ("a", "b"),
+                               {"head_count": str(heads)}),
+            tensors, compiler.WeightStore({}))
+
+    def test_linear_rejects_runtime_silent_return_shapes(self):
+        for x, w in [((2, 8, 8), (8, 8)), ((4, 9), (8, 9)),
+                     ((4, 8), (9, 8)), ((4, 8), (8, 16)), ((0, 8), (8, 8))]:
+            with self.subTest(x=x, w=w), self.assertRaises(SystemExit):
+                self.linear(x, w)
+
+    def test_linear_rejects_dynamic_weight(self):
+        with self.assertRaisesRegex(SystemExit, "static"):
+            self.linear((4, 8), (8, 8), "input")
+
+    def test_odd_token_count_is_supported(self):
+        self.assertEqual(self.linear((9, 16), (8, 16)).outputs[0].shape, (9, 8))
+        self.assertEqual(self.matmul((9, 16), (16, 8)).outputs[0].shape, (9, 8))
+
+    def test_matmul_rejects_mismatched_or_unaligned_axes(self):
+        for lhs, rhs, heads, transpose in [
+            ((8,), (8, 8), 1, False), ((8, 8), (16, 8), 1, False),
+            ((8, 9), (9, 8), 1, False), ((8, 8), (8, 9), 1, False),
+            ((3, 8, 8), (8, 16), 2, False),
+            ((8, 16), (8, 24), 2, True), ((0, 8), (8, 8), 1, False),
+        ]:
+            with self.subTest(lhs=lhs, rhs=rhs), self.assertRaises(SystemExit):
+                self.matmul(lhs, rhs, heads, transpose)
+
+    def test_matmul_scratch_boundary(self):
+        self.matmul((96, 64), (64, 64))  # Exactly 32768 bytes.
+        with self.assertRaisesRegex(SystemExit, "scratch"):
+            self.matmul((97, 64), (64, 64))
+
+
 if __name__ == "__main__":
     unittest.main()

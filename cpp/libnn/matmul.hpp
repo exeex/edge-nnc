@@ -7,9 +7,13 @@ namespace nnedge::op {
 
 inline size_t mm_read_cycle()
 {
+#ifdef NNEDGE_PHASE_PROFILE
     size_t value;
     __asm__ volatile("rdcycle %0" : "=r"(value));
     return value;
+#else
+    return 0;
+#endif
 }
 
 inline size_t mm_blocked_index(size_t blk, size_t token, size_t lane)
@@ -255,6 +259,7 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
         }
     }
     const size_t profile_output_done = mm_read_cycle();
+#ifdef NNEDGE_PHASE_PROFILE
     edge_sim_printf("MATMUL_PHASE lhs=%lu(lhs_issue=%lu lhs_wait=%lu) tensor=%lu output_clean=%lu output_dma=%lu(out_issue=%lu out_wait=%lu) total=%lu\n",
            profile_lhs_done - profile_begin,
            profile_lhs_issue, profile_lhs_wait,
@@ -263,6 +268,7 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
            profile_output_done - profile_output_clean_done,
            profile_output_issue, profile_output_wait,
            profile_output_done - profile_begin);
+#endif
 }
 
 template <typename DType>
