@@ -170,6 +170,8 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
     }
     const size_t profile_lhs_done = mm_read_cycle();
 
+    const size_t tile_rows = rows * 8u;
+    size_t tiles_left = total_tiles;
     if (rhs_transposed) {
         // Entry order: head, k_blk, out_blk. X walks output rows and every
         // eight fragments publish one BF16 8x8 entry.
@@ -184,10 +186,11 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
              ++global_k) {
             const size_t head = global_k / k_blocks;
             const size_t k_blk = global_k % k_blocks;
+            // START copies staged configuration to the next descriptor bank.
+            // I is constant across this output-tile loop; stage it once.
+            edge_tensor_setin(input_stage + global_k * tile_rows);
+            bfloat16_t *output_ptr = output_stage + head * out_blocks * tile_rows;
             for (size_t out_blk = 0; out_blk < out_blocks; ++out_blk) {
-                bfloat16_t *output_ptr = output_stage +
-                    (head * out_blocks + out_blk) * rows * 8u;
-                edge_tensor_setin(input_stage + global_k * rows * 8u);
                 edge_tensor_setout(output_ptr);
                 if (k_blk == 0u) {
                     edge_tensor_start<EDGE_TENSOR_START_OPT_NO_PSUM>();
@@ -195,9 +198,9 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
                     edge_tensor_setpsum(output_ptr);
                     edge_tensor_start();
                 }
-                const size_t tile_id = global_k * out_blocks + out_blk;
-                if (tile_id + 1u < total_tiles)
+                if (--tiles_left != 0u)
                     edge_tensor_wld_circular();
+                output_ptr += tile_rows;
             }
         }
     } else {
@@ -213,21 +216,22 @@ inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rh
         for (size_t global_out = 0; global_out < head_count * out_blocks;
              ++global_out) {
             const size_t head = global_out / out_blocks;
+            bfloat16_t *output_ptr = output_stage + global_out * tile_rows;
+            bfloat16_t *input_ptr = input_stage + head * k_blocks * tile_rows;
+            // O and P remain fixed across K tiles. NO_PSUM ignores the staged
+            // P on the first tile; later STARTs inherit both pointers.
+            edge_tensor_setout(output_ptr);
+            edge_tensor_setpsum(output_ptr);
             for (size_t k_blk = 0; k_blk < k_blocks; ++k_blk) {
-                bfloat16_t *output_ptr =
-                    output_stage + global_out * rows * 8u;
-                edge_tensor_setin(input_stage +
-                    (head * k_blocks + k_blk) * rows * 8u);
-                edge_tensor_setout(output_ptr);
+                edge_tensor_setin(input_ptr);
                 if (k_blk == 0u) {
                     edge_tensor_start<EDGE_TENSOR_START_OPT_NO_PSUM>();
                 } else {
-                    edge_tensor_setpsum(output_ptr);
                     edge_tensor_start();
                 }
-                const size_t tile_id = global_out * k_blocks + k_blk;
-                if (tile_id + 1u < total_tiles)
+                if (--tiles_left != 0u)
                     edge_tensor_wld_t_circular();
+                input_ptr += tile_rows;
             }
         }
     }
