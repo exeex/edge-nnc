@@ -52,13 +52,18 @@ class FP4Test(unittest.TestCase):
             narrow = (narrow.float() + 2**-12).to(torch.bfloat16)
         self.assertEqual(float(narrow), 1.)
 
-    def test_compilation_and_reject_multi_token(self):
+    def test_compilation_multi_token(self):
         from pathlib import Path
         model,args = compiler.load_model_example(Path(__file__).parent/'test/smoke_linear_fp4.py')
         program,weights = compiler.compile_model(model,args)
         self.assertEqual(len(weights.data), 12*144)
         self.assertEqual(program.nodes[-1].op,'linear_fp4')
+        for rows in (2, 9, 64, 65):
+            program,multi_weights = compiler.compile_model(model,(args[0].repeat(rows,1),))
+            self.assertEqual(program.nodes[-1].outputs[0].shape, (rows,24))
+            self.assertEqual(len(multi_weights.data),len(weights.data))
+            self.assertEqual(len(program.nodes[-1].dram_preferred),2)
         with self.assertRaises(SystemExit):
-            compiler.compile_model(model,(args[0].repeat(2,1),))
+            compiler.compile_model(model,(args[0][:,:64],))
 
 if __name__ == '__main__': unittest.main()

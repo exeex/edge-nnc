@@ -23,10 +23,10 @@ scale. Public tensors remain contiguous; the packed payload is Tensor<uint8_t>.
 The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
 eight scales and a four-slot circular ring. Tile mode stores intermediate
 PSUM as BF22 in FP32 words: first tile skips P, middle tiles read/write P,
-and the last tile reads P and writes BF16. The runtime reserves one private
-128-byte region (only vector zero is used). The current E3 wide P/O layout
-uses eight contiguous FP32 containers in its first 32 bytes. The legacy
-+4-channel configuration instead places the two 16-byte halves 64 bytes apart.
+and the last tile reads P and writes BF16. The E3 wide P/O layout uses eight contiguous FP32 containers per token.
+A private P buffer holds the entire token chunk (32 bytes/token, minimum
+128 bytes). The legacy single-vector allocation remains large enough for its
++4-channel separated halves; multi-token validation targets the E3 wide product.
 
 Each tile computes `R22(P + R22(scale * R22(dot(x,q))))`. WSLD owns weight
 and scale tokens; one start consumes one tile. Only the final output is
@@ -34,23 +34,39 @@ rounded to BF16. Python supplies a normal-range numerical reference with
 these precision boundaries; it is not a bit-true model of dot alignment or
 exceptional-value hardware behavior.
 
-Initial supported shapes: x[1,K], q[N,K], K a positive multiple of 32, N a
-positive multiple of 8; weights/scales must be static. The compiler rejects
-multiple tokens and operands exceeding the 32 KiB scratch budget. Runtime
-handles DTCM operands directly; external operands are staged via DMA before or
-after circular loading. Multi-token batching and group sizes other than 32
-are future work. This version requires the E3 BF22 P/O extension; older RTL
+Supported shapes: x[M,K], q[N,K], M positive, K a positive multiple of 32,
+N a positive multiple of 8; weights/scales must be static. Like BF16 Matmul,
+the runtime uses one START per weight tile with `setn=token_count`. It chunks
+M at 64 tokens or a smaller count fitting the 32 KiB scratch budget; the
+compiler rejects shapes for which even one token cannot fit. Each chunk
+replays the same packed weight slots through the four-slot circular ring.
+
+Private input storage is [K/8,token,8], output storage is [N/8,token,8], and
+P is [token,8] in FP32 containers. Public tensors remain contiguous [M,K]
+and [M,N]. Multi-token generated calls prefer external operands for
+source-strided DMA gather/scatter, as BF16 Matmul does. DTCM operands use
+E3 Tensor COPY for each aligned 16-byte vector, avoiding unsupported
+DTCM-to-DTCM DMA. A single token can directly alias DTCM tensors. Input packing
+finishes before circular DMA starts; Tensor and DMA finish before output
+scatter or scratch reuse. P is staged once per chunk and O changes only
+between intermediate and final K tiles. Group sizes other than 32 remain
+unsupported. This version requires the E3 BF22 P/O extension; older RTL
 that stores `{bf16,16'b0}` loses the extra precision.
 
 Validation:
 
 - `python -m unittest nnc.test_compiler nnc.test_fp4`: compiler tests, all 16
   encodings including signed zero, ties, zero groups, invalid inputs,
-  independent slot decoding, static lowering and multi-token rejection.
+  independent slot decoding, static lowering and multi-token shapes.
 - `smoke_linear_fp4_group32.py`: single slot, distinct signed output lanes.
 - `smoke_linear_fp4_group64.py`: changing scales across accumulated K groups.
 - `smoke_linear_fp4.py`: N=24, K=128, nonidentity weights, 12 slots with ring wrap.
-- `fp4_dram_main.cpp` with the last model: direct external input/output path.
+- `smoke_linear_fp4_batch.py`: M64/K64/N64, one weight tile serves 64 tokens.
+- `smoke_linear_fp4_tail.py`: M9/K128/N24, token tail and distinct rows.
+- `smoke_linear_fp4_chunks.py`: M65/K128/N24, 64+1 chunks and ring restart.
+- `smoke_linear_fp4_capacity.py`: M33/K512/N16, scratch-limited 29+4 chunks.
+- `fp4_dtcm_main.cpp`: force DTCM inputs/outputs; use tail and chunks models.
+- `fp4_dram_main.cpp` with `smoke_linear_fp4.py`: direct external input/output path.
 
 Use the consumer's run_smoke wrapper and `--model-file nnc/test/<model>`;
 for the external path additionally use `--main-file nnc/test/fp4_dram_main.cpp`.

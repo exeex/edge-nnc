@@ -150,8 +150,9 @@ class LinearFP4Lowerer(OpLowerer):
     def lower(self, node, tensors, weights):
         from nnc.fp4 import pack_slots
         x, q, scale = (tensors.require(name) for name in node.args)
-        if len(q.shape) != 2 or x.shape != (1, q.shape[1]):
-            raise SystemExit("FP4 Linear currently requires a single token [1,K]")
+        if (len(q.shape) != 2 or len(x.shape) != 2 or
+                x.shape[0] <= 0 or x.shape[1] != q.shape[1]):
+            raise SystemExit("FP4 Linear requires positive matching [M,K] and [N,K]")
         n, k = q.shape
         if n <= 0 or k <= 0 or n % 8 or k % 32 or scale.shape != (n, k // 32):
             raise SystemExit("FP4 Linear requires N%8=0, K%32=0, scales[N,K/32]")
@@ -167,8 +168,9 @@ class LinearFP4Lowerer(OpLowerer):
             weights.data.extend(bytes(padding))
             weights.cursor += padding
             weights.use_payload(packed, payload, "uint8_t")
-        return LoweredNode((self.output(node.outputs[0], (1, n)),),
-                           "linear_fp4", (x.name,), {"packed": packed.name, "n": str(n)})
+        return LoweredNode((self.output(node.outputs[0], (x.shape[0], n)),),
+                           "linear_fp4", (x.name,), {"packed": packed.name, "n": str(n)},
+                           dram_preferred=(x.name, node.outputs[0]) if x.shape[0] > 1 else ())
 
 
 class RopeLowerer(OpLowerer):
