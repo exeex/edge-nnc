@@ -20,6 +20,13 @@ with no internal padding. Constant payload bases are aligned to 16 bytes.
 Compared with 512 bytes of BF16 weights per group, the ratio is 3.56x including
 scale. Public tensors remain contiguous; the packed payload is Tensor<uint8_t>.
 
+`cpp/libnn/linear_quant.hpp` provides the named `op::linear_fp4` entry point.
+It fixes `FP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4,0,4,8>` and forwards
+typed packs or the compiler's byte payload to the shared `linear_weight_slots`
+kernel. The same header also defines `linear_q8_0`, `linear_fp8_e4m3fn`, and
+`linear_fp8_e5m2` runtime presets; these do not add FP8/Q8 graph lowering or
+GGUF import. Q8_0 uses BF16 scales and E3 tile order after conversion.
+
 The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
 eight scales and a four-slot circular ring. Tile mode stores intermediate
 PSUM as BF22 in FP32 words: first tile skips P, middle tiles read/write P,
