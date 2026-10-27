@@ -3,55 +3,55 @@
     "operator": "matmul",
     "capacity": 32,
     "chunks": 4,
-    "stream_cycles": 15502,
-    "stream_util_percent": 52.84479422010063,
-    "operator_cycles": 16367,
-    "operator_util_percent": 50.05193376916967
+    "stream_cycles": 11684,
+    "stream_util_percent": 70.1129750085587,
+    "operator_cycles": 12399,
+    "operator_util_percent": 66.06984434228566
   },
   {
     "operator": "matmul",
     "capacity": 64,
     "chunks": 2,
-    "stream_cycles": 9454,
-    "stream_util_percent": 86.65115295113179,
-    "operator_cycles": 10187,
-    "operator_util_percent": 80.4162167468342
+    "stream_cycles": 9238,
+    "stream_util_percent": 88.67720285776142,
+    "operator_cycles": 9879,
+    "operator_util_percent": 82.92337281101327
   },
   {
     "operator": "matmul",
     "capacity": 128,
     "chunks": 1,
-    "stream_cycles": 8776,
-    "stream_util_percent": 93.34548769371011,
-    "operator_cycles": 9443,
-    "operator_util_percent": 86.7520914963465
+    "stream_cycles": 8725,
+    "stream_util_percent": 93.89111747851003,
+    "operator_cycles": 9329,
+    "operator_util_percent": 87.81219852074177
   },
   {
     "operator": "matmul_transpose",
     "capacity": 32,
     "chunks": 4,
-    "stream_cycles": 17560,
-    "stream_util_percent": 46.651480637813215,
-    "operator_cycles": 18358,
-    "operator_util_percent": 44.62359734175836
+    "stream_cycles": 13676,
+    "stream_util_percent": 59.90055571804621,
+    "operator_cycles": 14293,
+    "operator_util_percent": 57.31476946757154
   },
   {
     "operator": "matmul_transpose",
     "capacity": 64,
     "chunks": 2,
-    "stream_cycles": 9748,
-    "stream_util_percent": 84.03775133360689,
-    "operator_cycles": 10426,
-    "operator_util_percent": 78.57279877230002
+    "stream_cycles": 9566,
+    "stream_util_percent": 85.6366297302948,
+    "operator_cycles": 10117,
+    "operator_util_percent": 80.97262034199862
   },
   {
     "operator": "matmul_transpose",
     "capacity": 128,
     "chunks": 1,
-    "stream_cycles": 8814,
-    "stream_util_percent": 92.94304515543453,
-    "operator_cycles": 9432,
-    "operator_util_percent": 86.85326547921967
+    "stream_cycles": 8725,
+    "stream_util_percent": 93.89111747851003,
+    "operator_cycles": 9243,
+    "operator_util_percent": 88.6292329330304
   },
   {
     "operator": "linear_nvfp4",

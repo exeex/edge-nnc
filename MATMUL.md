@@ -124,3 +124,15 @@ historical IO variants and must not be treated as the current API.
 
 The checked-in measurement table and version manifest are in
 [benchmarks/tensor-64x64-128](benchmarks/tensor-64x64-128/README.md).
+
+## Scalar control
+
+Matmul retains P/partial-output pointers for a complete K reduction;
+Matmul-transpose retains its input pointer for all output blocks at one K
+block. First/middle/last tile modes are emitted from separate loop boundaries,
+without specializing runtime tensor dimensions. The hardware START path copies
+configuration forward between its CSR banks, so unchanged pointers need no
+repeated setter commands. Tensor metadata passes by const reference.
+
+The [benchmark report](benchmarks/tensor-64x64-128/README.md#software-control-optimization)
+records the A/B cycles, pointer command counts, code size and source versions.

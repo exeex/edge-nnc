@@ -1,37 +1,18 @@
 {
   "measurement_date": "2026-10-28",
   "published_implementation_versions": {
-    "nnc": "4879aafcf887363067b1d5d04347bdc520febf39",
+    "nnc": "79091dc70e8b8fdb5d46a8595160675fc40549b0",
     "edge-e3": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
     "edge-asic": "3390ec73ac28041c4039572674ce42ee11ddbaed",
     "edge-32": "55a089b372e2a18f8fa99185db7db264ad72602d"
   },
-  "workload": {
-    "tokens": 128,
-    "k": 64,
-    "n": 64,
-    "ideal_cycles": 8192,
-    "macs_per_cycle": 64
-  },
   "scope": "BF16 input/output in SRAM; weights/RHS in DRAM; stream and full operator only",
-  "publication": "Existing completed measurements archived after implementation commit; no rerun. Runtime/compiler source hashes match this implementation commit. Only benchmark report writers changed since measurement.",
-  "report_writer_files_changed_since_run": {
-    "matmul": [
-      "nnc/benchmark_matmul.py",
-      "nnc/benchmark_quant.py",
-      "nnc/benchmark_tensor.py"
-    ],
-    "quant": [
-      "nnc/benchmark_matmul.py",
-      "nnc/benchmark_quant.py",
-      "nnc/benchmark_tensor.py"
-    ]
-  },
+  "publication": "All 24 operator/capacity measurements rebuilt and rerun from the clean listed NNC commit. No static dimension specialization or timing-window changes.",
   "original_measurement_provenance": {
     "matmul": {
       "nnc": {
-        "head": "4a5ba97225d4cffb0943604f45e848757457a66a",
-        "status": "M MATMUL.md\n M QUANT_LINEAR.md\n M README.md\n M cpp/libnn/attention.hpp\n M cpp/libnn/matmul.hpp\n M cpp/libnn/ops.hpp\n M nnc/__init__.py\n M nnc/benchmark_matmul.py\n M nnc/benchmark_quant.py\n M nnc/codegen.py\n M nnc/compiler.py\n M nnc/lowering.py\n M nnc/run_smoke.py\n M nnc/test/q8_0_typed_main.cpp\n M nnc/test_compiler.py\n M nnc/test_microscale.py\n M nnc/test_quant.py\n M nnc/test_tensor_tile_io.py\n?? cpp/libnn/tensor_layout.hpp\n?? nnc/benchmark_tensor.py\n?? nnc/layout.py\n?? nnc/test/smoke_matmul_large.py\n?? nnc/test/smoke_matmul_pipeline.py\n?? nnc/test/smoke_quant_layout_pipeline.py"
+        "head": "79091dc70e8b8fdb5d46a8595160675fc40549b0",
+        "status": ""
       },
       "edge32": {
         "head": "55a089b372e2a18f8fa99185db7db264ad72602d",
@@ -41,10 +22,14 @@
         "head": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
         "status": ""
       },
+      "asic": {
+        "head": "3390ec73ac28041c4039572674ce42ee11ddbaed",
+        "status": ""
+      },
       "command": [
         "/Users/chi-shengwu/n906/src/edge-nnc/nnc/benchmark_matmul.py",
         "--out-dir",
-        "/Users/chi-shengwu/n906/build/tensor-operator-unified/matmul",
+        "/Users/chi-shengwu/n906/build/tensor-operator-control/matmul",
         "--sim-exe",
         "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
         "--edge32-include",
@@ -63,7 +48,7 @@
         "cpp/libnn/linear.hpp": "29b2db43aec9c298d64692825575b9bda3d4ebef38e91fc4a7dc7d4072d482f5",
         "cpp/libnn/linear_quant.hpp": "65c22e7e7df2b70b3f7ab44fb5822dbea9374210d692d6156a411e663bbd459b",
         "cpp/libnn/linear_weight_slots.hpp": "d8a9f37333e1b05a3f10917df955a406dc6641060e9ca49933635810f9189fab",
-        "cpp/libnn/matmul.hpp": "9b9b9ae50ae3ad22d16f94b89b089f24efabb98c7bdc97db5c85f42d329c9a3e",
+        "cpp/libnn/matmul.hpp": "1464c96ffec680b026e8af1c797adfe87ebbb7a8ad0094b6083fa59d2d8b193b",
         "cpp/libnn/ops.hpp": "ef6b1505123a133a0f2f08601d11e264ab070b9df91df12f1698c86b51c8cfb6",
         "cpp/libnn/rms_norm.hpp": "4c527ac91c8e91c6456c52b4f1fc4a2adaf447f72552b837a3bc0c621467f218",
         "cpp/libnn/rope.hpp": "d5a1e27069c50a7344e58098b13b6c37fc9847c795672f51bc06e69aa3ad6f75",
@@ -73,9 +58,9 @@
         "cpp/libnn/tensor_tile_view.hpp": "fc89d36c47ddf9f87e5adc86e676efc788c606832e9a21b5d10239976b1a70f4",
         "cpp/libnn/weight_pack.hpp": "d9da6e015034abec5983b1cc1636d67c7f206adc256f295ad35cdc1dee2577f3",
         "nnc/__init__.py": "98e9990c9bb4e7786fb7e9e03f02aa5575dd65cbb2f67bf30c4fd4c5c4b4ee0e",
-        "nnc/benchmark_matmul.py": "e09972b4f2b2d65e88b9c7904f24288ef53a3698ff25c6b67322a6980e6de523",
-        "nnc/benchmark_quant.py": "19c968ac9906fb0b455c121b460db0f3e29e2671fac5add9edbb869aab3928f2",
-        "nnc/benchmark_tensor.py": "358054c355b2394e84b111f0b5f2dbec5b5bdf499a5b0e8d006a64b251c2d218",
+        "nnc/benchmark_matmul.py": "9c85c8ead9ac1591f83b3c02d0f5e7f1e581fb5066a2f164e7486b9f3a22f5d3",
+        "nnc/benchmark_quant.py": "429fe203acff6aca501e520eb8fa4fc6ef8280d38be1d747629c980efb1f4ebd",
+        "nnc/benchmark_tensor.py": "6ed6c410c8ab76de591752647e83134881e6f7ee9a8546cdeeaf84cccfba4c27",
         "nnc/codegen.py": "4f6da7c0b0f482cc7ed388056bcf9015440d30cc50281017e4500c824e242547",
         "nnc/compiler.py": "ef8582ba73232a3a5aed30d6cb7aa1aa166f058836edb9023e454a321b0a5696",
         "nnc/fp4.py": "ea75629086c1df8c03af0aafd8ae7fd2409677bb767031778093b31380c77a56",
@@ -108,8 +93,8 @@
     },
     "quant": {
       "nnc": {
-        "head": "4a5ba97225d4cffb0943604f45e848757457a66a",
-        "status": "M MATMUL.md\n M QUANT_LINEAR.md\n M README.md\n M cpp/libnn/attention.hpp\n M cpp/libnn/matmul.hpp\n M cpp/libnn/ops.hpp\n M nnc/__init__.py\n M nnc/benchmark_matmul.py\n M nnc/benchmark_quant.py\n M nnc/codegen.py\n M nnc/compiler.py\n M nnc/lowering.py\n M nnc/run_smoke.py\n M nnc/test/q8_0_typed_main.cpp\n M nnc/test_compiler.py\n M nnc/test_microscale.py\n M nnc/test_quant.py\n M nnc/test_tensor_tile_io.py\n?? cpp/libnn/tensor_layout.hpp\n?? nnc/benchmark_tensor.py\n?? nnc/layout.py\n?? nnc/test/smoke_matmul_large.py\n?? nnc/test/smoke_matmul_pipeline.py\n?? nnc/test/smoke_quant_layout_pipeline.py"
+        "head": "79091dc70e8b8fdb5d46a8595160675fc40549b0",
+        "status": ""
       },
       "edge32": {
         "head": "55a089b372e2a18f8fa99185db7db264ad72602d",
@@ -119,13 +104,17 @@
         "head": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
         "status": ""
       },
+      "asic": {
+        "head": "3390ec73ac28041c4039572674ce42ee11ddbaed",
+        "status": ""
+      },
       "sim_exe": "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
       "sim_sha256": "bf0e01047b00027e920c4dddaf2065614fe4c5a0e4bd9495d3e90e2693bab970",
       "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
       "command": [
         "/Users/chi-shengwu/n906/src/edge-nnc/nnc/benchmark_quant.py",
         "--out-dir",
-        "/Users/chi-shengwu/n906/build/tensor-operator-unified/quant",
+        "/Users/chi-shengwu/n906/build/tensor-operator-control/quant",
         "--sim-exe",
         "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
         "--edge32-include",
@@ -146,8 +135,8 @@
         "fp8_e5m2"
       ],
       "simulator_workspace": {
-        "head": "b27a3fea1b793398f318b71b97a949c625bb6941",
-        "status": "m ../../../../../src/edge-nnc"
+        "head": "a64f36215e3e26585994823ef74fe89a45c4cba9",
+        "status": "M ../../../../../src/edge-nnc"
       },
       "compile_flags": "riscv32-unknown-elf rv32im_zba ilp32 medany C++17 -O2 freestanding",
       "source_sha256": {
@@ -159,7 +148,7 @@
         "cpp/libnn/linear.hpp": "29b2db43aec9c298d64692825575b9bda3d4ebef38e91fc4a7dc7d4072d482f5",
         "cpp/libnn/linear_quant.hpp": "65c22e7e7df2b70b3f7ab44fb5822dbea9374210d692d6156a411e663bbd459b",
         "cpp/libnn/linear_weight_slots.hpp": "d8a9f37333e1b05a3f10917df955a406dc6641060e9ca49933635810f9189fab",
-        "cpp/libnn/matmul.hpp": "9b9b9ae50ae3ad22d16f94b89b089f24efabb98c7bdc97db5c85f42d329c9a3e",
+        "cpp/libnn/matmul.hpp": "1464c96ffec680b026e8af1c797adfe87ebbb7a8ad0094b6083fa59d2d8b193b",
         "cpp/libnn/ops.hpp": "ef6b1505123a133a0f2f08601d11e264ab070b9df91df12f1698c86b51c8cfb6",
         "cpp/libnn/rms_norm.hpp": "4c527ac91c8e91c6456c52b4f1fc4a2adaf447f72552b837a3bc0c621467f218",
         "cpp/libnn/rope.hpp": "d5a1e27069c50a7344e58098b13b6c37fc9847c795672f51bc06e69aa3ad6f75",
@@ -169,9 +158,9 @@
         "cpp/libnn/tensor_tile_view.hpp": "fc89d36c47ddf9f87e5adc86e676efc788c606832e9a21b5d10239976b1a70f4",
         "cpp/libnn/weight_pack.hpp": "d9da6e015034abec5983b1cc1636d67c7f206adc256f295ad35cdc1dee2577f3",
         "nnc/__init__.py": "98e9990c9bb4e7786fb7e9e03f02aa5575dd65cbb2f67bf30c4fd4c5c4b4ee0e",
-        "nnc/benchmark_matmul.py": "e09972b4f2b2d65e88b9c7904f24288ef53a3698ff25c6b67322a6980e6de523",
-        "nnc/benchmark_quant.py": "19c968ac9906fb0b455c121b460db0f3e29e2671fac5add9edbb869aab3928f2",
-        "nnc/benchmark_tensor.py": "358054c355b2394e84b111f0b5f2dbec5b5bdf499a5b0e8d006a64b251c2d218",
+        "nnc/benchmark_matmul.py": "9c85c8ead9ac1591f83b3c02d0f5e7f1e581fb5066a2f164e7486b9f3a22f5d3",
+        "nnc/benchmark_quant.py": "429fe203acff6aca501e520eb8fa4fc6ef8280d38be1d747629c980efb1f4ebd",
+        "nnc/benchmark_tensor.py": "6ed6c410c8ab76de591752647e83134881e6f7ee9a8546cdeeaf84cccfba4c27",
         "nnc/codegen.py": "4f6da7c0b0f482cc7ed388056bcf9015440d30cc50281017e4500c824e242547",
         "nnc/compiler.py": "ef8582ba73232a3a5aed30d6cb7aa1aa166f058836edb9023e454a321b0a5696",
         "nnc/fp4.py": "ea75629086c1df8c03af0aafd8ae7fd2409677bb767031778093b31380c77a56",
