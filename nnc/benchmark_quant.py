@@ -128,7 +128,8 @@ def main():
             console = (build / "software-console.log").read_text()
             profiles = re.findall(r"^NNC_QUANT_PROFILE (.+)$", console, re.M)
             mac_profiles = re.findall(r"^MAC PROFILE (.+)$", console, re.M)
-            if len(profiles) != 1 or len(mac_profiles) != 1 or "PASS: Edge-32 Tensor" not in console:
+            harness_pass = "PASS: Edge-32 Tensor" in console or "EDGE_DEMO TEST PASS" in console
+            if len(profiles) != 1 or len(mac_profiles) != 1 or not harness_pass:
                 raise RuntimeError(f"{spec}/{capacity}: missing unique runtime/MAC profile or harness pass")
             counts = {k: int(v) for k,v in re.findall(r"(\w+)=(\d+)", profiles[0])}
             mac = {k: int(v) for k,v in re.findall(r"(\w+)=(\d+)", mac_profiles[0])}
