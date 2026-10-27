@@ -39,7 +39,7 @@ It fixes `FP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4,0,4,8>` and forwards
 typed packs or the compiler's byte payload to the shared `linear_weight_slots`
 kernel. The same header also defines `linear_q8_0`, `linear_fp8_e4m3fn`, and
 `linear_fp8_e5m2` runtime presets; [QUANT_LINEAR.md](QUANT_LINEAR.md) describes their graph
-lowering and packing. GGUF import remains outside this path. Q8_0 uses BF16 scales and E3 tile order after conversion.
+lowering and packing. GGUF import remains outside this path. Q8_0 preserves FP16 scales and uses E3 tile order after byte-preserving repacking.
 
 The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
 eight scales and a four-slot circular ring. Tile mode stores intermediate

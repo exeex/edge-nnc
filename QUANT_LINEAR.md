@@ -9,7 +9,9 @@ Each spec has a readable PyTorch source model and a seven-line C++ main:
 | `example/linear_fp8_e4m3fn` | `linear_fp8_e4m3fn` | E4M3FN | 272 |
 | `example/linear_fp8_e5m2` | `linear_fp8_e5m2` | E5M2 | 272 |
 
-All four use BF16 input/output, K32 groups, and eight BF16 scales per pack.
+All four use BF16 input/output, K32 groups, and eight 16-bit scales per pack.
+Q8_0 uses native FP16 scales (`stype=3`); FP4 and both FP8 presets use BF16
+scales (`stype=0`).
 Weights and scales are static parameters. Public inputs and outputs remain
 contiguous `[M,K]` and `[M,N]`; N must be a positive multiple of 8 and K a
 positive multiple of 32. Each model uses M=9, N=16, K=64 to exercise token
@@ -59,7 +61,8 @@ root so the local `nnc` package is importable.
 The earlier `(x,q,scale)` custom-op signatures remain supported for explicit
 format/precision fixtures. `nnc.fp4.quantize(weight)` produces exact E2M1
 values in a BF16 carrier and BF16 scales. `nnc.quant.quantize(weight, spec)`
-does the same for `q8_0`, `fp8_e4m3fn`, or `fp8_e5m2`.
+returns exact code carriers and native scales for `q8_0` (FP16),
+`fp8_e4m3fn` or `fp8_e5m2` (BF16).
 `nnc.quant.quantize_source(weight, spec)` separates source code generation
 from the current scale encoding:
 
@@ -69,12 +72,12 @@ from the current scale encoding:
 - Both scaled FP8 policies use K32 max-absolute BF16 scales, normalize to the
   selected dtype's maximum finite magnitude, and use finite saturated native
   PyTorch FP8 conversion. All-zero FP8 groups use scale one.
-- `quantize` adapts source scales to the BF16 stand-in for current `stype=0`,
-  preserving the codes unchanged. Q8_0 scale conversion may change numerical
-  values, but never triggers re-quantization of its INT8 codes.
+- `quantize` preserves source scale bits and codes. Q8_0 never converts its
+  FP16 scales to BF16. Explicit checkpoint codes/scales use the same packer
+  without re-quantization.
 
 The compiler rejects nonfinite or inexact explicit carriers and requires
-nonnegative finite BF16 scales for these three byte-weight specs. Zero scale
+nonnegative finite native scales (FP16 for Q8_0, BF16 for FP8). Zero scale
 is valid, including Q8_0 zero blocks. FP4 keeps its existing quantizer rules.
 
 Export reads the named custom op; shared quant lowering packs the static
@@ -105,7 +108,7 @@ need libc shims. An existing consumer's strong definition remains supported.
 
 ## Slot layout
 
-Packs are ordered `[N/8,K/32]`. Each has eight little-endian BF16 scales,
+Packs are ordered `[N/8,K/32]`. Each has eight little-endian native scales,
 followed immediately by four output-major 8x8 weight tiles. FP4 packs two
 values per byte (earlier value in the low nibble); INT8 and FP8 use one byte
 per value. These layouts require no tail padding at the default K32 group size.
@@ -117,20 +120,40 @@ four K8 tiles; no scale is duplicated per tile and no zero-point is stored.
 The layout is a reversible permutation of eight `[scale16, codes32]` row
 blocks with no per-slot padding. This contract requires N%8=0 and K%32=0.
 
-BF16 is the temporary 16-bit scale interpretation, independent of the weight
-code format. Python's `SCALE_DTYPE` and the C++ byte-weight scale-type constant
-identify this current choice. Native FP16 `stype` will need matched hardware,
-packer, reference and runtime support; the grouping and tile order can remain
-unchanged. In particular, original GGUF FP16 scale bits cannot yet be fed
-directly to `stype=0` as though they encoded BF16 values. No GGUF importer is
-provided here, and BF22 GEMM rounding is not guaranteed to match llama.cpp.
+Q8_0 uses `EDGE_TENSOR_STYPE_FP16=3`. WSLD consumes the same 16-byte scale
+prefix and exactly expands IEEE FP16 into BF20 (1/8/11), including FP16
+subnormals as normal BF20 values. Signed zero is preserved, infinity expands
+to infinity and NaNs canonicalize. FP16's eleven significand bits fit within
+BF20's twelve; no scale rounding or new post-scale multiplier is needed.
+The existing BF22 x BF20 product rounds directly to BF22, followed by BF22
+PSUM addition and final BF16 output. The Q8_0 reference models shared-exponent
+Dot8 alignment and direct product rounding without an intermediate FP32 RNE.
+
+The source row-block payload and tiled payload are reversible permutations:
+original INT8 codes and FP16 scale bits are preserved with identical storage
+overhead. DMA remains format-independent, reading seventeen 128-bit beats
+per slot. FP8 presets retain their BF16 scale policy. No GGUF file importer
+is provided; callers supply extracted blocks or static codes/scales. These
+format guarantees do not imply bit-identical llama.cpp GEMM accumulation.
 
 ## Regression ownership
 
 `nnc/test_quant.py` checks module wrapping, named export with BF16 fake
 metadata, compiler-side weight quantization, the public artifact API, all finite INT8/FP8 codes with an independent
 decoder, exact serialized tile order and signed zeros, invalid carriers and
-scales, named codegen, payload sizes, and group-scale reference semantics.
+scales, named codegen, payload sizes, all nonnegative finite FP16 scale bits,
+and group-scale reference semantics. A typed-pack C++ main runs the same
+core fixture through `Tensor<Q8_0WeightPack>` and checks all outputs exactly.
+WSLD leaf tests independently check all
+65,536 FP16 encodings at read latency 1 and 4, scalar broadcast and stalls.
+NNC Q8_0 tests cover native low fraction bits, subnormals/extrema, single-token
+DTCM operands, multi-chunk tails and repeated circular wrap. These core cases
+compare every BF16 output with zero tolerance. The original biased example
+uses a 2^-9 absolute tolerance (one BF16 ULP at this fixture's largest affected
+output magnitude) for the separate BF16 add: that existing unit
+RNE-aligns each operand to the common exponent before adding, which can differ
+from PyTorch single-rounding addition. Its matching core-only case uses zero
+tolerance and the same weights/input.
 The four example source models are also linked into `nnc/test/smoke_*.py` and
 are discovered by the full model harness. Existing FP4 precision, tail,
 capacity and ring-wrap tests remain in that suite.

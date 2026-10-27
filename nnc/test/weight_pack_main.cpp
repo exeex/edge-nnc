@@ -32,7 +32,9 @@ template<unsigned W> static constexpr unsigned encode(int q)
 
 template<unsigned W, unsigned T, unsigned S> static int run()
 {
-    using Pack = WeightPack<W, 0, T, S>;
+    constexpr unsigned ST = W == EDGE_TENSOR_WTYPE_INT8 && T == 4 && S == 8
+        ? EDGE_TENSOR_STYPE_FP16 : EDGE_TENSOR_STYPE_BF16;
+    using Pack = WeightPack<W, ST, T, S>;
     constexpr unsigned rows = 9, n = 16, groups = 3, k = groups * T * 8;
     alignas(64) static Pack packs[2 * groups] = {};
     alignas(64) static nnedge::bfloat16_t x[rows * k], y[rows * n];
@@ -44,7 +46,9 @@ template<unsigned W, unsigned T, unsigned S> static int run()
             auto &p = packs[ob*groups+g];
             for (unsigned s = 0; s < S; ++s) {
                 const unsigned mode = (g+s)%3;
-                const unsigned bits = mode == 0 ? 0x3f00 : mode == 1 ? 0x3f80 : 0x4000;
+                const unsigned bits = ST == EDGE_TENSOR_STYPE_FP16
+                    ? (mode == 0 ? 0x3800 : mode == 1 ? 0x3c00 : 0x4000)
+                    : (mode == 0 ? 0x3f00 : mode == 1 ? 0x3f80 : 0x4000);
                 p.bytes[2*s] = bits;
                 p.bytes[2*s+1] = bits >> 8;
             }

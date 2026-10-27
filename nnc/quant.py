@@ -1,17 +1,18 @@
-"""K32 byte weights: native source scales, BF16 scale stand-in for stype=0.
+"""K32 byte weights: Q8_0 native FP16 scales; FP8 BF16 scales.
 
-Q8_0 preserves reference INT8 codes before adapting FP16 scales to BF16.
+Q8_0 preserves reference INT8 codes and FP16 scale bits.
 All three specs store eight 16-bit scales and four 8x8 tiles per 272-byte slot.
 """
 import struct
 import torch
 from nnc.fp4 import round_bf22
+from nnc.microscale import tensor_dot8
 
 FP8_DTYPES = {
     'fp8_e4m3fn': torch.float8_e4m3fn,
     'fp8_e5m2': torch.float8_e5m2,
 }
-SCALE_DTYPE = torch.bfloat16  # Current stype=0; independent of weight encoding.
+SCALE_DTYPES = {'q8_0': torch.float16, **{spec: torch.bfloat16 for spec in FP8_DTYPES}}
 
 
 def _validate_shape(q, scale=None):
@@ -57,19 +58,19 @@ def quantize_source(weight, spec):
 
 
 def quantize(weight, spec):
-    """Adapt source scales to current stype=0, retaining source codes unchanged."""
+    """Retain source codes and scale dtype for the selected hardware stype."""
     q, scale = quantize_source(weight, spec)
-    return q, scale.to(SCALE_DTYPE)
+    return q, scale
 
 
 def pack_slots(q, scale, spec):
-    """Eight BF16 scales followed by four output-major 8x8 byte tiles."""
+    """Eight native 16-bit scales followed by four output-major 8x8 byte tiles."""
     _validate_shape(q, scale)
-    if q.dtype != torch.bfloat16 or scale.dtype != SCALE_DTYPE:
-        raise ValueError('quant values and scales must be BF16 carriers')
+    if q.dtype != torch.bfloat16 or scale.dtype != SCALE_DTYPES[spec]:
+        raise ValueError('quant values require BF16 carriers and scales require the native spec dtype')
     value, s = q.detach().cpu(), scale.detach().cpu()
     if not torch.isfinite(value).all() or not torch.isfinite(s).all() or (s < 0).any():
-        raise ValueError('quant values must be finite and BF16 scales nonnegative finite')
+        raise ValueError('quant values must be finite and native scales nonnegative finite')
     if spec == 'q8_0':
         if (value < -128).any() or (value > 127).any() or not torch.equal(value, value.round()):
             raise ValueError('Q8_0 carrier must contain exact signed INT8 values')
@@ -95,8 +96,16 @@ def _linear_reference(x, q, scale):
     # Match the existing FP4 normal-range BF22 numerical reference.
     result = torch.zeros((*x.shape[:-1], q.shape[0]), device=x.device)
     for offset in range(0, q.shape[1], 8):
-        dot = x[..., offset:offset+8].float() @ q[:, offset:offset+8].float().T
-        scaled = round_bf22(round_bf22(dot) * scale[:, offset // 32].float())
+        if scale.dtype == torch.float16:
+            dot = tensor_dot8(x[..., offset:offset+8], q[:, offset:offset+8])
+            product = dot.double() * scale[:, offset // 32].double()
+            mantissa, exponent = torch.frexp(product)
+            scaled = torch.ldexp(torch.round(mantissa * (1 << 14)), exponent - 14).float()
+            scaled = torch.where(scaled.abs() < torch.finfo(torch.float32).tiny,
+                                 torch.zeros_like(scaled), scaled)
+        else:
+            dot = x[..., offset:offset+8].float() @ q[:, offset:offset+8].float().T
+            scaled = round_bf22(round_bf22(dot) * scale[:, offset // 32].float())
         result = round_bf22(result + scaled)
     return result.to(torch.bfloat16).to(x.dtype)
 

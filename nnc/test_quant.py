@@ -8,7 +8,7 @@ import unittest
 
 import torch
 from nnc import compiler
-from nnc.quant import pack_slots, quantize, quantize_source, linear_q8_0
+from nnc.quant import pack_slots, quantize, quantize_source, linear_q8_0, SCALE_DTYPES
 
 SPECS = ('q8_0', 'fp8_e4m3fn', 'fp8_e5m2')
 
@@ -25,7 +25,7 @@ def decode_byte(byte, spec):
 
 
 class QuantTest(unittest.TestCase):
-    def test_q8_reference_codes_precede_scale_adaptation(self):
+    def test_q8_reference_codes_and_native_scale_bits(self):
         w=torch.zeros(8,64)
         below_half=torch.nextafter(torch.tensor(.5),torch.tensor(0.)).item()
         w[0,:7]=torch.tensor([127.,.5,-.5,1.5,-1.5,below_half,-below_half])
@@ -38,8 +38,9 @@ class QuantTest(unittest.TestCase):
         self.assertEqual(source.dtype,torch.float16)
         self.assertEqual(float(source[2,0]),0.)
         self.assertTrue(torch.equal(actual,q))
-        self.assertTrue(torch.equal(scale,source.to(torch.bfloat16)))
-        self.assertGreater(float((source.float()-scale.float()).abs().max()),0.)
+        self.assertEqual(scale.dtype,torch.float16)
+        self.assertTrue(torch.equal(scale.view(torch.int16),source.view(torch.int16)))
+        self.assertGreater(float((source.float()-source.to(torch.bfloat16).float()).abs().max()),0.)
         # Independently check the source policy for non-tie values too.
         for row in range(8):
             for group in range(2):
@@ -62,19 +63,32 @@ class QuantTest(unittest.TestCase):
                                      dtype=torch.uint8).reshape(n,k)
                 q = torch.tensor([[decode_byte(int(b),spec) for b in row] for row in codes],
                                  dtype=torch.bfloat16)
-                payload = pack_slots(q,scale,spec)
+                native_scale = scale.to(SCALE_DTYPES[spec])
+                payload = pack_slots(q,native_scale,spec)
                 self.assertEqual(len(payload), 4*272)
                 for ob in range(n//8):
                     for group in range(k//32):
                         slot = payload[(ob*2+group)*272:(ob*2+group+1)*272]
-                        decoded_scale = torch.frombuffer(bytearray(slot[:16]),dtype=torch.bfloat16)
-                        self.assertTrue(torch.equal(decoded_scale, scale[ob*8:ob*8+8,group]))
+                        decoded_scale = torch.frombuffer(bytearray(slot[:16]),dtype=SCALE_DTYPES[spec])
+                        self.assertTrue(torch.equal(decoded_scale, native_scale[ob*8:ob*8+8,group]))
                         for tile in range(4):
                             raw = slot[16+tile*64:80+tile*64]
                             expected = codes[ob*8:ob*8+8,group*32+tile*8:group*32+tile*8+8]
                             # Exact byte comparison includes both signed zeros.
                             self.assertEqual(raw, bytes(expected.flatten().tolist()))
                             self.assertTrue(all(math.isfinite(decode_byte(b,spec)) for b in raw))
+
+    def test_q8_all_nonnegative_finite_scale_bits_roundtrip(self):
+        # All finite nonnegative half bit patterns, with signed INT8 extrema.
+        bits = torch.arange(0x7c00,dtype=torch.int32).to(torch.int16).reshape(8,-1)
+        scales = bits.contiguous().view(torch.float16)
+        q = torch.arange(256,dtype=torch.uint8).view(torch.int8).repeat(scales.numel()//8).reshape(8,-1).to(torch.bfloat16)
+        payload = pack_slots(q,scales,'q8_0')
+        groups = scales.shape[1]
+        self.assertEqual(len(payload),scales.numel()*34)
+        for group in range(groups):
+            actual = struct.unpack('<8H',payload[group*272:group*272+16])
+            self.assertEqual(actual,tuple(int(v) for v in bits[:,group]))
 
     def test_quantization_zero_and_finite_groups(self):
         for spec in SPECS:
@@ -83,7 +97,7 @@ class QuantTest(unittest.TestCase):
                 w[0,:32] = 0
                 q,s = quantize(w,spec)
                 self.assertEqual(q.dtype,torch.bfloat16)
-                self.assertEqual(s.dtype,torch.bfloat16)
+                self.assertEqual(s.dtype,SCALE_DTYPES[spec])
                 self.assertEqual(float(s[0,0]),0. if spec == 'q8_0' else 1.)
                 self.assertTrue(torch.equal(q[0,:32],torch.zeros(32)))
                 self.assertTrue(torch.isfinite(q).all())
@@ -96,7 +110,7 @@ class QuantTest(unittest.TestCase):
     def test_reject_invalid_carriers_and_scales(self):
         for spec in SPECS:
             q = torch.zeros(8,32,dtype=torch.bfloat16)
-            s = torch.ones(8,1,dtype=torch.bfloat16)
+            s = torch.ones(8,1,dtype=SCALE_DTYPES[spec])
             bad_values = (.5,128.,-129.) if spec == 'q8_0' else (.1,float('inf'))
             for value in bad_values:
                 invalid = q.clone()
@@ -188,7 +202,7 @@ class QuantTest(unittest.TestCase):
     def test_reference_applies_each_group_scale_before_sum(self):
         x = torch.ones(9,64,dtype=torch.bfloat16)
         q = torch.cat((torch.ones(8,32),torch.full((8,32),-2.)),dim=1).to(torch.bfloat16)
-        scale = torch.tensor([[.5,2.]],dtype=torch.bfloat16).repeat(8,1)
+        scale = torch.tensor([[.5,2.]],dtype=torch.float16).repeat(8,1)
         self.assertTrue(torch.equal(linear_q8_0(x,q,scale),torch.full((9,8),-112.,dtype=torch.bfloat16)))
 
 
