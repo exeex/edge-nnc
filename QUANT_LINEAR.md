@@ -90,13 +90,17 @@ bit-true exceptional-value hardware model. See [FP4_LINEAR.md](FP4_LINEAR.md).
 
 ## Compile-time capacity and preplanned tensor IO
 
-All named quant C++ entries accept `MaxTokens`, defaulting to 64. NNC can
+Each quant spec has one C++ entry point, matching NNC codegen: BF16 `Tensor`
+input/output and `Tensor<uint8_t>` packed weight bytes. There are no separate
+typed-pack or `TensorTileView` overloads in `linear_quant.hpp`.
+
+All entries accept `MaxTokens=64` and `TensorSram=false`. NNC can
 explicitly select the 32/64/128-token variants. Capacity remains bounded by
 available SRAM; a smaller final chunk is supported.
 
-The preplanned path uses an explicit `nnedge::TensorTileView`: logical shape
+The preplanned path selects `TensorSram=true`: logical shape
 `[tokens, channels]`, physical storage `[channels/8, tokens, 8]`. NNC arranges
-this storage before execution. The view performs no copy or conversion.
+this storage before execution. The template flag performs no copy or conversion.
 Inputs and outputs already in working SRAM are used directly. The kernel
 allocates only FP32 partial sums and the circular weight ring; it does not
 stage another copy of the input/output and submits no Tensor COPY commands.
@@ -104,11 +108,10 @@ A chunk points into each block using the full tensor's token extent, so
 32/64-token versions and capacity-limited tails also need no SRAM repacking.
 
 ```cpp
-using nnedge::TensorTileView;
 // x/y are already in tensor working SRAM; slots are in DRAM.
-nnedge::op::linear_mxfp4<128>(TensorTileView(y), TensorTileView(x), slots);
-nnedge::op::linear_nvfp4<128>(TensorTileView(y), TensorTileView(x), slots, global_scale_bits);
-nnedge::op::linear_q8_0<128>(TensorTileView(y), TensorTileView(x), slots);
+nnedge::op::linear_mxfp4<128, true>(y, x, slots);
+nnedge::op::linear_nvfp4<128, true>(y, x, slots, global_scale_bits);
+nnedge::op::linear_q8_0<128, true>(y, x, slots);
 ```
 
 For a complete tensor whose DRAM and SRAM storage use the same planned layout,
@@ -125,7 +128,7 @@ nnc.compile(model, (x,), out_dir="build/linear", save_reference=True,
 
 Or use `nnc.compiler --tensor-tile-io --quant-token-capacity 128 ...`.
 The compiler serializes the example input into tensor order, generates SRAM
-allocation and `TensorTileView` calls, and records the physical IO ABI in
+allocation and `linear_*<capacity, true>(y, x, slots)` calls, and records the physical IO ABI in
 `io_layout.json`. `expected.bin` and the exported output storage use this
 same physical order. A dynamic input producer must supply this planned order;
 the option does not transpose dynamic data invisibly at runtime. Logical
@@ -138,9 +141,9 @@ that do not understand it. The same compiler option separately supports a
 single BF16 Matmul with an unmodified runtime RHS; see [MATMUL.md](MATMUL.md).
 Layout propagation through a whole model and
 optimal capacity selection are future NNC work. The default export remains
-the existing contiguous ABI. Existing ordinary `Tensor` overloads retain
-that ABI and its compatibility staging; do not pass contiguous bytes to a
-`TensorTileView`.
+the existing contiguous ABI through the same entry point with
+`TensorSram=false`. Set `TensorSram=true` only for compiler-planned SRAM
+storage; it does not reinterpret contiguous input bytes correctly.
 
 For 128 tokens and K=N=64, working input/output occupy 32 KiB. Additional
 scratch is 5,248 bytes (NVFP4), 6,272 bytes (MXFP4), or 5,184 bytes (Q8_0).
@@ -273,8 +276,9 @@ format guarantees do not imply bit-identical llama.cpp GEMM accumulation.
 metadata, compiler-side weight quantization, the public artifact API, all finite INT8/FP8 codes with an independent
 decoder, exact serialized tile order and signed zeros, invalid carriers and
 scales, named codegen, payload sizes, all nonnegative finite FP16 scale bits,
-and group-scale reference semantics. A typed-pack C++ main runs the same
-core fixture through `Tensor<Q8_0WeightPack>` and checks all outputs exactly.
+and group-scale reference semantics. An internal typed-pack C++ main runs
+the same core fixture through the shared `linear_weight_slots` kernel and
+checks all outputs exactly. Named quant entries take only NNC byte payloads.
 WSLD leaf tests independently check all
 65,536 FP16 encodings at read latency 1 and 4, scalar broadcast and stalls.
 NNC Q8_0 tests cover native low fraction bits, subnormals/extrema, single-token

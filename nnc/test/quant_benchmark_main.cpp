@@ -15,7 +15,7 @@ extern "C" int main()
     const size_t input_begin = edge_get_cycle();
     if (!op::load_tensor_sram(sx,TensorTileView(model::mio::x))) return 2;
     const size_t input_cycles = edge_get_cycle()-input_begin;
-    if (!benchmark_linear(sy,sx)) return 3;
+    if (!benchmark_linear(y,x)) return 3;
     // The same transfer boundary as the reference, outside kernel timing.
     const size_t output_begin = edge_get_cycle();
     if (!op::store_tensor_sram(TensorTileView(model::mio::y),sy)) return 4;

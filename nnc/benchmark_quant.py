@@ -103,8 +103,8 @@ def main():
             (case_generated / "bench_config.hpp").write_text(
                 '#pragma once\n#include "init.hpp"\n'
                 f'using BenchmarkPack = nnedge::{dict(mxfp4="MXFP4WeightPack", nvfp4="NVFP4WeightPack", q8_0="Q8_0WeightPack")[spec]};\n'
-                'template <typename View>\ninline bool benchmark_linear(View y, View x) {\n'
-                f'    return nnedge::op::linear_{spec}<{capacity}>(y, x, '
+                'inline bool benchmark_linear(nnedge::Tensor<nnedge::bfloat16_t> y, nnedge::Tensor<nnedge::bfloat16_t> x) {\n'
+                f'    return nnedge::op::linear_{spec}<{capacity}, true>(y, x, '
                 f'model::mio::ctx.{packed}{global_arg});\n}}\n')
             build_args = argparse.Namespace(
                 profile=False, phase_profile=False,

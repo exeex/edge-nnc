@@ -74,12 +74,13 @@ template<unsigned W, unsigned T, unsigned S> static int run()
     // Reject byte counts masquerading as pack counts and incomplete K groups.
     if (op::linear_weight_slots(ty, tx, Tensor<Pack>(Shape(sizeof(packs)),packs))) return 1;
     if (op::linear_weight_slots(ty, Tensor<nnedge::bfloat16_t>(Shape(rows,k-1),x), slots)) return 2;
+    Tensor<uint8_t> byte_slots(Shape(sizeof(packs)),reinterpret_cast<uint8_t *>(packs));
     bool ok;
     if constexpr (T == 4 && S == 8) {
-        if constexpr (W == EDGE_TENSOR_WTYPE_FP4) ok = op::linear_fp4(ty,tx,slots);
-        else if constexpr (W == EDGE_TENSOR_WTYPE_INT8) ok = op::linear_q8_0(ty,tx,slots);
-        else if constexpr (W == EDGE_TENSOR_WTYPE_FP8_E4M3FN) ok = op::linear_fp8_e4m3fn(ty,tx,slots);
-        else if constexpr (W == EDGE_TENSOR_WTYPE_FP8_E5M2) ok = op::linear_fp8_e5m2(ty,tx,slots);
+        if constexpr (W == EDGE_TENSOR_WTYPE_FP4) ok = op::linear_fp4(ty,tx,byte_slots);
+        else if constexpr (W == EDGE_TENSOR_WTYPE_INT8) ok = op::linear_q8_0(ty,tx,byte_slots);
+        else if constexpr (W == EDGE_TENSOR_WTYPE_FP8_E4M3FN) ok = op::linear_fp8_e4m3fn(ty,tx,byte_slots);
+        else if constexpr (W == EDGE_TENSOR_WTYPE_FP8_E5M2) ok = op::linear_fp8_e5m2(ty,tx,byte_slots);
         else ok = op::linear_weight_slots(ty,tx,slots);
     } else ok = op::linear_weight_slots(ty,tx,slots);
     if (!ok) return 3;

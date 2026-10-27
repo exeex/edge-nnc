@@ -368,7 +368,9 @@ class ForwardRenderer:
         args = ", ".join(self.arg(arg) for arg in node.args)
         outs = ", ".join(output.name for output in node.outputs)
         quant_template = f"<{self.quant_token_capacity}>" if self.quant_token_capacity is not None else ""
-        if self.tensor_tile_io:
+        if self.tensor_tile_io and node.op not in ("matmul", "matmul_transpose"):
+            quant_template = f"<{self.quant_token_capacity if self.quant_token_capacity is not None else 64}, true>"
+        if self.tensor_tile_io and node.op in ("matmul", "matmul_transpose"):
             args = ", ".join(f"nnedge::TensorTileView({self.arg(arg)})" if i == 0 else self.arg(arg)
                              for i,arg in enumerate(node.args))
             outs = ", ".join(f"nnedge::TensorTileView({output.name})" for output in node.outputs)

@@ -36,7 +36,7 @@ class TensorTileIOTests(unittest.TestCase):
             self.assertEqual((path/"input.bin").read_bytes(),packed(x))
             self.assertEqual((path/"expected.bin").read_bytes(),packed(expected))
             forward = (path/"forward.hpp").read_text()
-            self.assertIn("linear_q8_0<128>(nnedge::TensorTileView(",forward)
+            self.assertIn("linear_q8_0<128, true>(",forward)
             self.assertNotIn("malloc_tensor_dram",forward)
             self.assertNotIn("start_strided",forward)
             self.assertEqual(json.loads((path/"io_layout.json").read_text())["lanes"],8)

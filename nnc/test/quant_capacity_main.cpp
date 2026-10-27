@@ -20,12 +20,12 @@ extern "C" int main()
     if (alloc_failed() || dtcm_cursor() != kDtcmTensorArenaBytes) return 12;
     const TensorTileView sx(x), sy(y);
     // Working SRAM must be explicit; reject DRAM views and SRAM/SRAM load.
-    if (benchmark_linear(TensorTileView(model::mio::y),TensorTileView(model::mio::x))) return 18;
+    if (benchmark_linear(model::mio::y,model::mio::x)) return 18;
     if (op::load_tensor_sram(sx,sx)) return 19;
     // Probe every cache line of the occupied arena tail for scratch overlap.
     for (size_t i=0; i<numel(reserved); i+=64) reserved.data[i]=0xa5;
     if (!op::load_tensor_sram(sx,TensorTileView(model::mio::x))) return 20;
-    if (!benchmark_linear(sy,sx)) return 13;
+    if (!benchmark_linear(y,x)) return 13;
     if (!op::store_tensor_sram(TensorTileView(model::mio::y),sy)) return 21;
 
     // A caller-owned input sits above the allocator cursor, in the region
@@ -34,7 +34,7 @@ extern "C" int main()
         reinterpret_cast<nnedge::bfloat16_t *>(dtcm_base()+108u*1024u));
     const TensorTileView sm(manual);
     if (!op::load_tensor_sram(sm,TensorTileView(model::mio::x))) return 22;
-    if (!benchmark_linear(sy,sm)) return 14;
+    if (!benchmark_linear(y,manual)) return 14;
     for (size_t i=0; i<numel(reserved); i+=64)
         if (reserved.data[i] != 0xa5) return 15;
     // Both capacity-limited executions must produce the same public bytes.

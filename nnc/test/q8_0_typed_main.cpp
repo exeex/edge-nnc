@@ -1,4 +1,4 @@
-// Same generated Q8_0 fixture, through the public typed WeightPack overload.
+// Internal typed WeightPack kernel coverage; named quant API uses NNC byte slots.
 #include "init.hpp"
 #include "intrinsic/edge_sim_console.hpp"
 
@@ -16,7 +16,7 @@ extern "C" int main()
         reinterpret_cast<nnedge::Q8_0WeightPack *>(
             const_cast<unsigned char *>(model::weight_begin)));
     const auto begin = edge_get_cycle();
-    const bool ok = nnedge::op::linear_q8_0(y,x,slots);
+    const bool ok = nnedge::op::linear_weight_slots(y,x,slots);
     const auto cycles = edge_get_cycle()-begin;
     edge_sim_printf("NNC_PROFILE_BEGIN\n");
     edge_sim_printf("NNC_PROFILE\t0\tlinear_q8_0\tlinear_q8_0\t%llu\n",
