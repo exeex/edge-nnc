@@ -1,0 +1,249 @@
+{
+  "measurement_date": "2026-10-28",
+  "published_implementation_versions": {
+    "nnc": "4879aafcf887363067b1d5d04347bdc520febf39",
+    "edge-e3": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
+    "edge-asic": "3390ec73ac28041c4039572674ce42ee11ddbaed",
+    "edge-32": "55a089b372e2a18f8fa99185db7db264ad72602d"
+  },
+  "workload": {
+    "tokens": 128,
+    "k": 64,
+    "n": 64,
+    "ideal_cycles": 8192,
+    "macs_per_cycle": 64
+  },
+  "scope": "BF16 input/output in SRAM; weights/RHS in DRAM; stream and full operator only",
+  "publication": "Existing completed measurements archived after implementation commit; no rerun. Runtime/compiler source hashes match this implementation commit. Only benchmark report writers changed since measurement.",
+  "report_writer_files_changed_since_run": {
+    "matmul": [
+      "nnc/benchmark_matmul.py",
+      "nnc/benchmark_quant.py",
+      "nnc/benchmark_tensor.py"
+    ],
+    "quant": [
+      "nnc/benchmark_matmul.py",
+      "nnc/benchmark_quant.py",
+      "nnc/benchmark_tensor.py"
+    ]
+  },
+  "original_measurement_provenance": {
+    "matmul": {
+      "nnc": {
+        "head": "4a5ba97225d4cffb0943604f45e848757457a66a",
+        "status": "M MATMUL.md\n M QUANT_LINEAR.md\n M README.md\n M cpp/libnn/attention.hpp\n M cpp/libnn/matmul.hpp\n M cpp/libnn/ops.hpp\n M nnc/__init__.py\n M nnc/benchmark_matmul.py\n M nnc/benchmark_quant.py\n M nnc/codegen.py\n M nnc/compiler.py\n M nnc/lowering.py\n M nnc/run_smoke.py\n M nnc/test/q8_0_typed_main.cpp\n M nnc/test_compiler.py\n M nnc/test_microscale.py\n M nnc/test_quant.py\n M nnc/test_tensor_tile_io.py\n?? cpp/libnn/tensor_layout.hpp\n?? nnc/benchmark_tensor.py\n?? nnc/layout.py\n?? nnc/test/smoke_matmul_large.py\n?? nnc/test/smoke_matmul_pipeline.py\n?? nnc/test/smoke_quant_layout_pipeline.py"
+      },
+      "edge32": {
+        "head": "55a089b372e2a18f8fa99185db7db264ad72602d",
+        "status": ""
+      },
+      "e3": {
+        "head": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
+        "status": ""
+      },
+      "command": [
+        "/Users/chi-shengwu/n906/src/edge-nnc/nnc/benchmark_matmul.py",
+        "--out-dir",
+        "/Users/chi-shengwu/n906/build/tensor-operator-unified/matmul",
+        "--sim-exe",
+        "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
+        "--edge32-include",
+        "/Users/chi-shengwu/n906/src/edge-32/include",
+        "--e3-include",
+        "/Users/chi-shengwu/n906/src/edge-e3/include"
+      ],
+      "compiler": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin25.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin25.cfg\n",
+      "sim_sha256": "bf0e01047b00027e920c4dddaf2065614fe4c5a0e4bd9495d3e90e2693bab970",
+      "sources": {
+        "cpp/libnn/activation.hpp": "e7e1f6c35eeba17bd7d87cfbd17bd9dd4f5c103dab94af57b9943de0f73bd9f0",
+        "cpp/libnn/attention.hpp": "1541ce6ed3ded975854df2e46698e7832311da0e2d269a1292c6299a067783ac",
+        "cpp/libnn/dtype.hpp": "7d908a4aa6eeb16977faadb72918546ec07c34cc58c57a6fa09d73af566eea4c",
+        "cpp/libnn/elementwise.hpp": "94cb18524c3b5f12f4442177273096740c3006125f26d00144c94cb2d6ca4f11",
+        "cpp/libnn/kv_cache.hpp": "8207accda6f568e4218582f46d40a68073fe38ff961e91fe37ef21f29594ad36",
+        "cpp/libnn/linear.hpp": "29b2db43aec9c298d64692825575b9bda3d4ebef38e91fc4a7dc7d4072d482f5",
+        "cpp/libnn/linear_quant.hpp": "65c22e7e7df2b70b3f7ab44fb5822dbea9374210d692d6156a411e663bbd459b",
+        "cpp/libnn/linear_weight_slots.hpp": "d8a9f37333e1b05a3f10917df955a406dc6641060e9ca49933635810f9189fab",
+        "cpp/libnn/matmul.hpp": "9b9b9ae50ae3ad22d16f94b89b089f24efabb98c7bdc97db5c85f42d329c9a3e",
+        "cpp/libnn/ops.hpp": "ef6b1505123a133a0f2f08601d11e264ab070b9df91df12f1698c86b51c8cfb6",
+        "cpp/libnn/rms_norm.hpp": "4c527ac91c8e91c6456c52b4f1fc4a2adaf447f72552b837a3bc0c621467f218",
+        "cpp/libnn/rope.hpp": "d5a1e27069c50a7344e58098b13b6c37fc9847c795672f51bc06e69aa3ad6f75",
+        "cpp/libnn/softmax.hpp": "dc4e650f4c5e0fcda460acc306ecdfa6be98dc4224086897142ba2604a086469",
+        "cpp/libnn/tensor.hpp": "f5a84461899141553e0f50bac990b910fe358af130a98d7488f0e585e6b44315",
+        "cpp/libnn/tensor_layout.hpp": "63694b105f7023271f85ea583b7030f00e32c1ae92d178a51cead46bb0788880",
+        "cpp/libnn/tensor_tile_view.hpp": "fc89d36c47ddf9f87e5adc86e676efc788c606832e9a21b5d10239976b1a70f4",
+        "cpp/libnn/weight_pack.hpp": "d9da6e015034abec5983b1cc1636d67c7f206adc256f295ad35cdc1dee2577f3",
+        "nnc/__init__.py": "98e9990c9bb4e7786fb7e9e03f02aa5575dd65cbb2f67bf30c4fd4c5c4b4ee0e",
+        "nnc/benchmark_matmul.py": "e09972b4f2b2d65e88b9c7904f24288ef53a3698ff25c6b67322a6980e6de523",
+        "nnc/benchmark_quant.py": "19c968ac9906fb0b455c121b460db0f3e29e2671fac5add9edbb869aab3928f2",
+        "nnc/benchmark_tensor.py": "358054c355b2394e84b111f0b5f2dbec5b5bdf499a5b0e8d006a64b251c2d218",
+        "nnc/codegen.py": "4f6da7c0b0f482cc7ed388056bcf9015440d30cc50281017e4500c824e242547",
+        "nnc/compiler.py": "ef8582ba73232a3a5aed30d6cb7aa1aa166f058836edb9023e454a321b0a5696",
+        "nnc/fp4.py": "ea75629086c1df8c03af0aafd8ae7fd2409677bb767031778093b31380c77a56",
+        "nnc/graph.py": "8ae1afad111ce5887b8dc40791f75a94dbbf6a1dde287a0aaa2e9b9b0ea9522d",
+        "nnc/layout.py": "ae443cd7eaaedce2bd0d7ad0354b34af4027c70d9334f324e59226d6711b3095",
+        "nnc/liveness.py": "50ebfef62311a1cb76d6acf0b22857d631abd127de54fa33e71ecb2b6e9ae055",
+        "nnc/lowering.py": "9cb97e53df2fdc592f4202bbcb749eb874f6eb4d4f480af9fe932bf44c60ef3a",
+        "nnc/microscale.py": "0dfaaed353a129d18b27630e1a07336994f13c04e15dbf17a68ad995e8101ef7",
+        "nnc/modules.py": "50665547675a17ced8b50342aa59935a0cc75d9e88bccc4780f473e39d3d2001",
+        "nnc/ops.py": "6ae9bf4f7295879e274f694f1fe9dae5e617022a0834fa6375eee0eddaf47654",
+        "nnc/quant.py": "d78e15dc1ac32905e8ffacdc75875b688b063dbd360712bf50c8bc1360a7c737",
+        "nnc/run_harness.py": "5f9091157106929ad57d668fa7ccc97bec7195d242f0e6ff89284107fc5e2121",
+        "nnc/run_smoke.py": "1624a2e29d7f1162cf58f044471790f636d01997623d7fbfc5f1d97a8409a58e",
+        "nnc/test_compiler.py": "c4ad25f4a2afde89e4d38c121bfa8158d31348c5faa33bebac161e45e531a27e",
+        "nnc/test_fp4.py": "16c0765d8d693cde81e573b210dcd445ae9a64d9573a4475c6e4429ecac3248c",
+        "nnc/test_microscale.py": "2d3fbc0501a5a910e0b2e49e6fdca5e0333f1f21dee3ac19a2462a982b40e4cf",
+        "nnc/test_quant.py": "1a5510aaa828ae208659122737ac20375e6eb6984dffb3c1bfc27a45d80cbd5d",
+        "nnc/test_tensor_tile_io.py": "7aae6b4ac50df1899b56d6223c60c650a5314b72744ff84ad61aa64a07e4117d",
+        "nnc/test_transformer_modules.py": "621379577d52fec40d84d232f236da94d4eb0018d26217258b392c076597614e",
+        "nnc/transformer.py": "25ebb413e247a65f5022ff6ee6d38f22e65d33991c926be4a3ec13bbfefc6620",
+        "nnc/weights.py": "64ec8a26938e358942fb894b902bc727ce39dc4d22f72a491582f15533d987c1",
+        "nnc/test/matmul_benchmark_main.cpp": "2450517c51eb628323ccfb2d3bbd1a014bc3188b188584b80fbe517e66ad851e",
+        "nnc/test/matmul_mutation_main.cpp": "02b5cf747f02c26555fbf75d8835e8dc83ef6ee1ab38e8c5e7eac7d4d3962d4e"
+      },
+      "flags": "RV32IM/Zba ilp32 medany C++17 -O2",
+      "ring_slots": 8,
+      "tile_bytes": 128,
+      "rhs_layout": "original contiguous BF16 runtime matrix; never packed/quantized",
+      "warmup": "none; mutation checks use a separate two-invocation run"
+    },
+    "quant": {
+      "nnc": {
+        "head": "4a5ba97225d4cffb0943604f45e848757457a66a",
+        "status": "M MATMUL.md\n M QUANT_LINEAR.md\n M README.md\n M cpp/libnn/attention.hpp\n M cpp/libnn/matmul.hpp\n M cpp/libnn/ops.hpp\n M nnc/__init__.py\n M nnc/benchmark_matmul.py\n M nnc/benchmark_quant.py\n M nnc/codegen.py\n M nnc/compiler.py\n M nnc/lowering.py\n M nnc/run_smoke.py\n M nnc/test/q8_0_typed_main.cpp\n M nnc/test_compiler.py\n M nnc/test_microscale.py\n M nnc/test_quant.py\n M nnc/test_tensor_tile_io.py\n?? cpp/libnn/tensor_layout.hpp\n?? nnc/benchmark_tensor.py\n?? nnc/layout.py\n?? nnc/test/smoke_matmul_large.py\n?? nnc/test/smoke_matmul_pipeline.py\n?? nnc/test/smoke_quant_layout_pipeline.py"
+      },
+      "edge32": {
+        "head": "55a089b372e2a18f8fa99185db7db264ad72602d",
+        "status": ""
+      },
+      "e3": {
+        "head": "851bc5b60152e2c11bf42c9f9d9360a31a04a954",
+        "status": ""
+      },
+      "sim_exe": "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
+      "sim_sha256": "bf0e01047b00027e920c4dddaf2065614fe4c5a0e4bd9495d3e90e2693bab970",
+      "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
+      "command": [
+        "/Users/chi-shengwu/n906/src/edge-nnc/nnc/benchmark_quant.py",
+        "--out-dir",
+        "/Users/chi-shengwu/n906/build/tensor-operator-unified/quant",
+        "--sim-exe",
+        "/Users/chi-shengwu/n906/build/src/test-32/edge_core/edge32_nnc_obj/Vedge32_tensor_integration_tb",
+        "--edge32-include",
+        "/Users/chi-shengwu/n906/src/edge-32/include",
+        "--e3-include",
+        "/Users/chi-shengwu/n906/src/edge-e3/include",
+        "--spec",
+        "nvfp4",
+        "--spec",
+        "mxfp4",
+        "--spec",
+        "q8_0",
+        "--spec",
+        "fp4",
+        "--spec",
+        "fp8_e4m3fn",
+        "--spec",
+        "fp8_e5m2"
+      ],
+      "simulator_workspace": {
+        "head": "b27a3fea1b793398f318b71b97a949c625bb6941",
+        "status": "m ../../../../../src/edge-nnc"
+      },
+      "compile_flags": "riscv32-unknown-elf rv32im_zba ilp32 medany C++17 -O2 freestanding",
+      "source_sha256": {
+        "cpp/libnn/activation.hpp": "e7e1f6c35eeba17bd7d87cfbd17bd9dd4f5c103dab94af57b9943de0f73bd9f0",
+        "cpp/libnn/attention.hpp": "1541ce6ed3ded975854df2e46698e7832311da0e2d269a1292c6299a067783ac",
+        "cpp/libnn/dtype.hpp": "7d908a4aa6eeb16977faadb72918546ec07c34cc58c57a6fa09d73af566eea4c",
+        "cpp/libnn/elementwise.hpp": "94cb18524c3b5f12f4442177273096740c3006125f26d00144c94cb2d6ca4f11",
+        "cpp/libnn/kv_cache.hpp": "8207accda6f568e4218582f46d40a68073fe38ff961e91fe37ef21f29594ad36",
+        "cpp/libnn/linear.hpp": "29b2db43aec9c298d64692825575b9bda3d4ebef38e91fc4a7dc7d4072d482f5",
+        "cpp/libnn/linear_quant.hpp": "65c22e7e7df2b70b3f7ab44fb5822dbea9374210d692d6156a411e663bbd459b",
+        "cpp/libnn/linear_weight_slots.hpp": "d8a9f37333e1b05a3f10917df955a406dc6641060e9ca49933635810f9189fab",
+        "cpp/libnn/matmul.hpp": "9b9b9ae50ae3ad22d16f94b89b089f24efabb98c7bdc97db5c85f42d329c9a3e",
+        "cpp/libnn/ops.hpp": "ef6b1505123a133a0f2f08601d11e264ab070b9df91df12f1698c86b51c8cfb6",
+        "cpp/libnn/rms_norm.hpp": "4c527ac91c8e91c6456c52b4f1fc4a2adaf447f72552b837a3bc0c621467f218",
+        "cpp/libnn/rope.hpp": "d5a1e27069c50a7344e58098b13b6c37fc9847c795672f51bc06e69aa3ad6f75",
+        "cpp/libnn/softmax.hpp": "dc4e650f4c5e0fcda460acc306ecdfa6be98dc4224086897142ba2604a086469",
+        "cpp/libnn/tensor.hpp": "f5a84461899141553e0f50bac990b910fe358af130a98d7488f0e585e6b44315",
+        "cpp/libnn/tensor_layout.hpp": "63694b105f7023271f85ea583b7030f00e32c1ae92d178a51cead46bb0788880",
+        "cpp/libnn/tensor_tile_view.hpp": "fc89d36c47ddf9f87e5adc86e676efc788c606832e9a21b5d10239976b1a70f4",
+        "cpp/libnn/weight_pack.hpp": "d9da6e015034abec5983b1cc1636d67c7f206adc256f295ad35cdc1dee2577f3",
+        "nnc/__init__.py": "98e9990c9bb4e7786fb7e9e03f02aa5575dd65cbb2f67bf30c4fd4c5c4b4ee0e",
+        "nnc/benchmark_matmul.py": "e09972b4f2b2d65e88b9c7904f24288ef53a3698ff25c6b67322a6980e6de523",
+        "nnc/benchmark_quant.py": "19c968ac9906fb0b455c121b460db0f3e29e2671fac5add9edbb869aab3928f2",
+        "nnc/benchmark_tensor.py": "358054c355b2394e84b111f0b5f2dbec5b5bdf499a5b0e8d006a64b251c2d218",
+        "nnc/codegen.py": "4f6da7c0b0f482cc7ed388056bcf9015440d30cc50281017e4500c824e242547",
+        "nnc/compiler.py": "ef8582ba73232a3a5aed30d6cb7aa1aa166f058836edb9023e454a321b0a5696",
+        "nnc/fp4.py": "ea75629086c1df8c03af0aafd8ae7fd2409677bb767031778093b31380c77a56",
+        "nnc/graph.py": "8ae1afad111ce5887b8dc40791f75a94dbbf6a1dde287a0aaa2e9b9b0ea9522d",
+        "nnc/layout.py": "ae443cd7eaaedce2bd0d7ad0354b34af4027c70d9334f324e59226d6711b3095",
+        "nnc/liveness.py": "50ebfef62311a1cb76d6acf0b22857d631abd127de54fa33e71ecb2b6e9ae055",
+        "nnc/lowering.py": "9cb97e53df2fdc592f4202bbcb749eb874f6eb4d4f480af9fe932bf44c60ef3a",
+        "nnc/microscale.py": "0dfaaed353a129d18b27630e1a07336994f13c04e15dbf17a68ad995e8101ef7",
+        "nnc/modules.py": "50665547675a17ced8b50342aa59935a0cc75d9e88bccc4780f473e39d3d2001",
+        "nnc/ops.py": "6ae9bf4f7295879e274f694f1fe9dae5e617022a0834fa6375eee0eddaf47654",
+        "nnc/quant.py": "d78e15dc1ac32905e8ffacdc75875b688b063dbd360712bf50c8bc1360a7c737",
+        "nnc/run_harness.py": "5f9091157106929ad57d668fa7ccc97bec7195d242f0e6ff89284107fc5e2121",
+        "nnc/run_smoke.py": "1624a2e29d7f1162cf58f044471790f636d01997623d7fbfc5f1d97a8409a58e",
+        "nnc/test_compiler.py": "c4ad25f4a2afde89e4d38c121bfa8158d31348c5faa33bebac161e45e531a27e",
+        "nnc/test_fp4.py": "16c0765d8d693cde81e573b210dcd445ae9a64d9573a4475c6e4429ecac3248c",
+        "nnc/test_microscale.py": "2d3fbc0501a5a910e0b2e49e6fdca5e0333f1f21dee3ac19a2462a982b40e4cf",
+        "nnc/test_quant.py": "1a5510aaa828ae208659122737ac20375e6eb6984dffb3c1bfc27a45d80cbd5d",
+        "nnc/test_tensor_tile_io.py": "7aae6b4ac50df1899b56d6223c60c650a5314b72744ff84ad61aa64a07e4117d",
+        "nnc/test_transformer_modules.py": "621379577d52fec40d84d232f236da94d4eb0018d26217258b392c076597614e",
+        "nnc/transformer.py": "25ebb413e247a65f5022ff6ee6d38f22e65d33991c926be4a3ec13bbfefc6620",
+        "nnc/weights.py": "64ec8a26938e358942fb894b902bc727ce39dc4d22f72a491582f15533d987c1",
+        "nnc/test/quant_benchmark_main.cpp": "ca92e069d9f400b6840f382bb2308109856c17315f72246b567d224810baefd5",
+        "nnc/test/quant_capacity_main.cpp": "4f244e26075caf121eaa1c22d320c9324202784c3bcae2f183c156664b827d90",
+        "nnc/test/quant_forward_main.cpp": "114cd15b2eb0ca81dc8079fd840cbfcea734ea9d7848028fec72ec797dbeb832"
+      },
+      "clang": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin25.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin25.cfg\n",
+      "shape": {
+        "tokens": 128,
+        "k": 64,
+        "n": 64
+      },
+      "memory": "NNC-planned tensor-tile BF16 IO in SRAM/DRAM; packed DRAM weights",
+      "warmup": "none; first invocation, ordinary DMA load before kernel timing",
+      "stream_window": "weight DMA submission through tensor.sync + dma.sync; per-chunk windows summed",
+      "artifacts": {
+        "nvfp4": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "53ab96a09b42deb49b1e6f3f87b48d606e1c888f060500cfc524ca4c1b01f3de",
+          "expected.bin": "3f22c370c28dde45c4515758a919bcd19684a6c2e5fe84d9c1bbbdcd0ffa638e",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        },
+        "mxfp4": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "e01b280d7ad02a13de48ac13b211d10c1ed0a8293862312aa54f5848eae1a75a",
+          "expected.bin": "afa1623c812437641706af49583fedcc059887b0511f6b4aaa4ef4cc91d78bb7",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        },
+        "q8_0": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "0785793946e94792c2426ab52ac4b40755ab8b71cc0bd276c075706fb5a487f5",
+          "expected.bin": "8e8aa46536a83c06cc612c17a15895f516d5486f548eee7a250128877497d67b",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        },
+        "fp4": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "3d3f203f70710aa2a4bf1ac4fe2bc5f3f596bc42cfcdf0082adca007511a3c93",
+          "expected.bin": "a03f636fd560263ba160004a9037efedde911023a80cf4791df73acb4c091294",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        },
+        "fp8_e4m3fn": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "f72207dac0d35e3693c8c5d696ac4ea392d3ef7ce9dde0f61eb053bfa5c822aa",
+          "expected.bin": "807c478f09633c54acbc35ebe4291ea2bd696398aaa0d1a9ae3df516e0740bb6",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        },
+        "fp8_e5m2": {
+          "input.bin": "f2291c14777c0a1f6510e5ac30e72ab2f84569cb87119c9b266fa79751ae2cc1",
+          "weight.bin": "0c6429c86c1cfedf08989b504f32b78b52d4f37c8c93f6229cb5558585a24d2d",
+          "expected.bin": "5ef33e293e69043f5d0212168c8bf1c03e49876f3001fe56103c60c43b358ac3",
+          "io_layout.json": "1ae9eeb80cd7d178f5f356882127a767c633e6822f43977dc296bbbf212a6983"
+        }
+      }
+    }
+  }
+}

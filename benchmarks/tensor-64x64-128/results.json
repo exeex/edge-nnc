@@ -1,0 +1,218 @@
+[
+  {
+    "operator": "matmul",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 15502,
+    "stream_util_percent": 52.84479422010063,
+    "operator_cycles": 16367,
+    "operator_util_percent": 50.05193376916967
+  },
+  {
+    "operator": "matmul",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9454,
+    "stream_util_percent": 86.65115295113179,
+    "operator_cycles": 10187,
+    "operator_util_percent": 80.4162167468342
+  },
+  {
+    "operator": "matmul",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8776,
+    "stream_util_percent": 93.34548769371011,
+    "operator_cycles": 9443,
+    "operator_util_percent": 86.7520914963465
+  },
+  {
+    "operator": "matmul_transpose",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 17560,
+    "stream_util_percent": 46.651480637813215,
+    "operator_cycles": 18358,
+    "operator_util_percent": 44.62359734175836
+  },
+  {
+    "operator": "matmul_transpose",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9748,
+    "stream_util_percent": 84.03775133360689,
+    "operator_cycles": 10426,
+    "operator_util_percent": 78.57279877230002
+  },
+  {
+    "operator": "matmul_transpose",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8814,
+    "stream_util_percent": 92.94304515543453,
+    "operator_cycles": 9432,
+    "operator_util_percent": 86.85326547921967
+  },
+  {
+    "operator": "linear_nvfp4",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 13304,
+    "stream_util_percent": 61.575466025255565,
+    "operator_cycles": 14299,
+    "operator_util_percent": 57.29071963074341
+  },
+  {
+    "operator": "linear_nvfp4",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9358,
+    "stream_util_percent": 87.54007266509937,
+    "operator_cycles": 10083,
+    "operator_util_percent": 81.24566101358722
+  },
+  {
+    "operator": "linear_nvfp4",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8833,
+    "stream_util_percent": 92.74312238197668,
+    "operator_cycles": 9423,
+    "operator_util_percent": 86.93621988750928
+  },
+  {
+    "operator": "linear_mxfp4",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 11356,
+    "stream_util_percent": 72.13807678760126,
+    "operator_cycles": 12267,
+    "operator_util_percent": 66.78079400016304
+  },
+  {
+    "operator": "linear_mxfp4",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9366,
+    "stream_util_percent": 87.46530002135383,
+    "operator_cycles": 10031,
+    "operator_util_percent": 81.66683281826339
+  },
+  {
+    "operator": "linear_mxfp4",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8861,
+    "stream_util_percent": 92.45006206974382,
+    "operator_cycles": 9403,
+    "operator_util_percent": 87.12113155375944
+  },
+  {
+    "operator": "linear_q8_0",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 10289,
+    "stream_util_percent": 79.61901059383808,
+    "operator_cycles": 10938,
+    "operator_util_percent": 74.89486194916803
+  },
+  {
+    "operator": "linear_q8_0",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9257,
+    "stream_util_percent": 88.4951928270498,
+    "operator_cycles": 9770,
+    "operator_util_percent": 83.84851586489253
+  },
+  {
+    "operator": "linear_q8_0",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8765,
+    "stream_util_percent": 93.4626354820308,
+    "operator_cycles": 9210,
+    "operator_util_percent": 88.94679695982627
+  },
+  {
+    "operator": "linear_fp4",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 10227,
+    "stream_util_percent": 80.1016916006649,
+    "operator_cycles": 10870,
+    "operator_util_percent": 75.36338546458141
+  },
+  {
+    "operator": "linear_fp4",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9231,
+    "stream_util_percent": 88.74444805546528,
+    "operator_cycles": 9738,
+    "operator_util_percent": 84.12405011295954
+  },
+  {
+    "operator": "linear_fp4",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8747,
+    "stream_util_percent": 93.65496741740026,
+    "operator_cycles": 9186,
+    "operator_util_percent": 89.17918571739604
+  },
+  {
+    "operator": "linear_fp8_e4m3fn",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 10289,
+    "stream_util_percent": 79.61901059383808,
+    "operator_cycles": 10938,
+    "operator_util_percent": 74.89486194916803
+  },
+  {
+    "operator": "linear_fp8_e4m3fn",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9257,
+    "stream_util_percent": 88.4951928270498,
+    "operator_cycles": 9770,
+    "operator_util_percent": 83.84851586489253
+  },
+  {
+    "operator": "linear_fp8_e4m3fn",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8765,
+    "stream_util_percent": 93.4626354820308,
+    "operator_cycles": 9210,
+    "operator_util_percent": 88.94679695982627
+  },
+  {
+    "operator": "linear_fp8_e5m2",
+    "capacity": 32,
+    "chunks": 4,
+    "stream_cycles": 10289,
+    "stream_util_percent": 79.61901059383808,
+    "operator_cycles": 10938,
+    "operator_util_percent": 74.89486194916803
+  },
+  {
+    "operator": "linear_fp8_e5m2",
+    "capacity": 64,
+    "chunks": 2,
+    "stream_cycles": 9257,
+    "stream_util_percent": 88.4951928270498,
+    "operator_cycles": 9770,
+    "operator_util_percent": 83.84851586489253
+  },
+  {
+    "operator": "linear_fp8_e5m2",
+    "capacity": 128,
+    "chunks": 1,
+    "stream_cycles": 8765,
+    "stream_util_percent": 93.4626354820308,
+    "operator_cycles": 9210,
+    "operator_util_percent": 88.94679695982627
+  }
+]
