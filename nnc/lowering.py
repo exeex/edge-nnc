@@ -58,6 +58,11 @@ class BinarySameShapeLowerer(OpLowerer):
 class AddLowerer(OpLowerer):
     def lower(self, node: GraphNode, tensors: TensorTable, weights: WeightStore) -> LoweredNode:
         lhs = self.static_or_dynamic(tensors, node.args[0])
+        rhs = self.static_or_dynamic(tensors, node.args[1])
+        if rhs.shape != lhs.shape and not (len(lhs.shape) == 2 and rhs.shape == (lhs.shape[1],)):
+            raise SystemExit("add requires equal shapes or a rank-1 per-row bias")
+        if rhs.target in weights.parameters:
+            weights.use(rhs)
         eye = weights.use_eye8("tensor_eye8")
         return LoweredNode(
             (self.output(node.outputs[0], lhs.shape),),
@@ -146,22 +151,39 @@ class LinearLowerer(OpLowerer):
         return LoweredNode((self.output(node.outputs[0], out_shape),), "linear", node.args, attrs)
 
 
-class LinearFP4Lowerer(OpLowerer):
+class LinearQuantLowerer(OpLowerer):
+    def __init__(self, spec):
+        self.spec = spec
+
     def lower(self, node, tensors, weights):
-        from nnc.fp4 import pack_slots
-        x, q, scale = (tensors.require(name) for name in node.args)
+        if len(node.args) not in (2, 3):
+            raise SystemExit("quant Linear requires (x, weight) or (x, q, scale)")
+        x, q = (tensors.require(name) for name in node.args[:2])
+        scale = tensors.require(node.args[2]) if len(node.args) == 3 else None
         if (len(q.shape) != 2 or len(x.shape) != 2 or
                 x.shape[0] <= 0 or x.shape[1] != q.shape[1]):
-            raise SystemExit("FP4 Linear requires positive matching [M,K] and [N,K]")
+            raise SystemExit("quant Linear requires positive matching [M,K] and [N,K]")
         n, k = q.shape
-        if n <= 0 or k <= 0 or n % 8 or k % 32 or scale.shape != (n, k // 32):
-            raise SystemExit("FP4 Linear requires N%8=0, K%32=0, scales[N,K/32]")
-        if ((2*k+63)//64*64 + (2*n+63)//64*64 + 128 + 4*144) > 32768:
-            raise SystemExit("FP4 Linear operands exceed DTCM scratch capacity")
-        if q.target not in weights.parameters or scale.target not in weights.parameters:
-            raise SystemExit("FP4 weight and scale must be static parameters")
-        payload = pack_slots(weights.parameters[q.target], weights.parameters[scale.target])
-        packed = TensorSpec(q.name + "_" + scale.name + "_fp4_slots", (len(payload),), "synthetic")
+        if n <= 0 or k <= 0 or n % 8 or k % 32 or (scale is not None and scale.shape != (n, k // 32)):
+            raise SystemExit("quant Linear requires N%8=0, K%32=0, scales[N,K/32]")
+        slot_bytes = 144 if self.spec == "fp4" else 272
+        if ((2*k+63)//64*64 + (2*n+63)//64*64 + 128 + 4*slot_bytes) > 32768:
+            raise SystemExit("quant Linear operands exceed DTCM scratch capacity")
+        if q.target not in weights.parameters or (scale is not None and scale.target not in weights.parameters):
+            raise SystemExit("quant weight and scale must be static parameters")
+        if self.spec == "fp4":
+            from nnc.fp4 import pack_slots, quantize
+        else:
+            from nnc.quant import pack_slots, quantize
+        if scale is None:
+            original = weights.parameters[q.target]
+            values, scales = quantize(original) if self.spec == "fp4" else quantize(original, self.spec)
+            packed_name = q.name + "_" + self.spec + "_slots"
+        else:
+            values, scales = weights.parameters[q.target], weights.parameters[scale.target]
+            packed_name = q.name + "_" + scale.name + "_" + self.spec + "_slots"
+        payload = pack_slots(values, scales) if self.spec == "fp4" else pack_slots(values, scales, self.spec)
+        packed = TensorSpec(packed_name, (len(payload),), "synthetic")
         # A previous BF16 constant need not end on a DMA beat boundary.
         if packed.name not in weights.records:
             padding = (-weights.cursor) % 16
@@ -169,8 +191,13 @@ class LinearFP4Lowerer(OpLowerer):
             weights.cursor += padding
             weights.use_payload(packed, payload, "uint8_t")
         return LoweredNode((self.output(node.outputs[0], (x.shape[0], n)),),
-                           "linear_fp4", (x.name,), {"packed": packed.name, "n": str(n)},
+                           "linear_" + self.spec, (x.name,), {"packed": packed.name, "n": str(n)},
                            dram_preferred=(x.name, node.outputs[0]) if x.shape[0] > 1 else ())
+
+
+class LinearFP4Lowerer(LinearQuantLowerer):
+    def __init__(self):
+        super().__init__("fp4")
 
 
 class RopeLowerer(OpLowerer):
@@ -270,6 +297,9 @@ OP_LOWERERS: dict[str, OpLowerer] = {
     "rms_norm": RmsNormLowerer(),
     "linear": LinearLowerer(),
     "linear_fp4": LinearFP4Lowerer(),
+    "linear_q8_0": LinearQuantLowerer("q8_0"),
+    "linear_fp8_e4m3fn": LinearQuantLowerer("fp8_e4m3fn"),
+    "linear_fp8_e5m2": LinearQuantLowerer("fp8_e5m2"),
     "rope": RopeLowerer(),
     "kv_cache_update": KvCacheLowerer(),
     "attention": AttentionLowerer(),

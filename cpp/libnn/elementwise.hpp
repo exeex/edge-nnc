@@ -80,6 +80,20 @@ template <typename DType, typename Alpha>
 inline void add(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
                 Tensor<DType> eye, Alpha alpha)
 {
+    // Broadcast an [N] Linear bias across a contiguous [M,N] tensor.
+    // Each row still uses the Tensor/DMA add path; no scalar payload copies.
+    if (rhs.shape.rank == 1 && lhs.shape.rank == 2 &&
+        rhs.shape.dims[0] == lhs.shape.dims[1]) {
+        const size_t cols = lhs.shape.dims[1];
+        for (size_t row = 0; row < lhs.shape.dims[0]; ++row)
+            add(Tensor<DType>(Shape(cols), y.data + row*cols),
+                Tensor<DType>(Shape(cols), lhs.data + row*cols), rhs, eye, alpha);
+        return;
+    }
+    if (numel(rhs) != numel(lhs)) {
+        alloc_failed() = true;
+        return;
+    }
     union {
         float f32;
         uint32_t bits;

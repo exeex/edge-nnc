@@ -1,10 +1,18 @@
 # FP4 Linear with BF16 scale
 
-The Python model uses ordinary BF16 tensors. `nnc.fp4.quantize(W)` returns
-`q[N,K]` containing exact E2M1 values in BF16 and `scale[N,K/32]` in BF16.
-`nnc.fp4.linear_fp4(x, q, scale)` supplies the PyTorch golden operation and an
-exportable custom-op boundary. Store q and scale as non-trainable Parameters
-for the compiler to serialize them. No PyTorch FP4 dtype is required.
+Use `nnc.LinearFp4(torch.nn.Linear(...))` in a model to replace a standard
+Linear with an explicit `nnedge::linear_fp4` custom op. The module copies the
+source weight and optional bias into frozen BF16 inference parameters; NNC
+quantizes and packs the weight during compile. `register_fake` only returns
+the BF16 output metadata. The model's `__main__` can call
+`nnc.compile(m, example_args, out_dir=...)` to write C++ and payloads directly.
+See [QUANT_LINEAR.md](QUANT_LINEAR.md) for the complete model flow and other
+quant specs.
+
+The explicit fixture form `nnc.fp4.linear_fp4(x, q, scale)` remains supported.
+`nnc.fp4.quantize(W)` returns `q[N,K]` containing exact E2M1 values in BF16
+and `scale[N,K/32]` in BF16. Store q and scale as non-trainable Parameters for
+those prequantized compiler tests. No PyTorch FP4 dtype is required.
 
 Quantization chooses a BF16-rounded max-absolute/6 scale per output channel
 and K32 group, then nearest E2M1 values with ties to smaller magnitude.
@@ -24,8 +32,8 @@ scale. Public tensors remain contiguous; the packed payload is Tensor<uint8_t>.
 It fixes `FP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4,0,4,8>` and forwards
 typed packs or the compiler's byte payload to the shared `linear_weight_slots`
 kernel. The same header also defines `linear_q8_0`, `linear_fp8_e4m3fn`, and
-`linear_fp8_e5m2` runtime presets; these do not add FP8/Q8 graph lowering or
-GGUF import. Q8_0 uses BF16 scales and E3 tile order after conversion.
+`linear_fp8_e5m2` runtime presets; [QUANT_LINEAR.md](QUANT_LINEAR.md) describes their graph
+lowering and packing. GGUF import remains outside this path. Q8_0 uses BF16 scales and E3 tile order after conversion.
 
 The E3 runtime uses wtype=4, stype=0, transpose=false, four tiles per slot,
 eight scales and a four-slot circular ring. Tile mode stores intermediate

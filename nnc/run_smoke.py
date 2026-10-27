@@ -14,7 +14,6 @@ import struct
 import subprocess
 import sys
 
-import torch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +23,6 @@ DEFAULT_MAIN = REPO_ROOT / "example/llama/src/smoke_main.cpp"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from nnc import compiler
 
 
 def tool(env_name: str, fallback: str) -> str:
@@ -48,10 +46,10 @@ def tool(env_name: str, fallback: str) -> str:
 
 
 def generate(model_file: Path, generated_dir: Path) -> tuple[int, ...]:
+    import torch
+    from nnc import compiler
     model, example_args = compiler.load_model_example(model_file)
-    abi = compiler.ForwardABI.from_example(model, example_args)
-    program, weights = compiler.compile_model(model, example_args)
-    compiler.write_artifacts(abi, program, weights, generated_dir)
+    compiler.compile(model, example_args, out_dir=generated_dir)
 
     with torch.no_grad():
         result = model(*example_args)
@@ -78,6 +76,11 @@ def build(args: argparse.Namespace, generated_dir: Path, build_dir: Path) -> Non
     subprocess.run([
         clang, *target, "-c", str(REPO_ROOT / "cpp/baremetal/crt0.s"),
         "-o", str(build_dir / "crt0.o"),
+    ], check=True)
+    subprocess.run([
+        clang, *target, "-std=c11", "-ffreestanding", "-fno-builtin", "-O2",
+        "-c", str(REPO_ROOT / "cpp/baremetal/memory.c"),
+        "-o", str(build_dir / "memory.o"),
     ], check=True)
     profile = ["-DNNEDGE_PROFILE=1"] if args.profile else []
     if args.phase_profile:
@@ -106,7 +109,7 @@ def build(args: argparse.Namespace, generated_dir: Path, build_dir: Path) -> Non
         "-nostdlib", "-nostartfiles",
         f"-Wl,-T,{REPO_ROOT / 'cpp/baremetal/linker.ld'}", "-Wl,--gc-sections",
         f"-Wl,--defsym=__nnedge_output_base=0x{args.output_base:x}",
-        str(build_dir / "crt0.o"), str(build_dir / "main.o"),
+        str(build_dir / "crt0.o"), str(build_dir / "main.o"), str(build_dir / "memory.o"),
         str(build_dir / "weights.o"), str(build_dir / "inputs.o"),
         "-o", str(build_dir / "llama.elf"),
     ], check=True)
@@ -229,6 +232,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-file", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--main-file", type=Path, default=DEFAULT_MAIN)
+    parser.add_argument("--artifacts-dir", type=Path,
+                        help="reuse saved headers/input/weight/expected.bin without importing PyTorch")
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--profile", action="store_true")
@@ -263,8 +268,24 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     build_dir = args.build_dir or REPO_ROOT / "example/llama/build" / args.model_file.stem
-    generated_dir = build_dir / "generated"
-    expected = generate(args.model_file, generated_dir)
+    if args.artifacts_dir:
+        generated_dir = args.artifacts_dir
+        required = ["forward.hpp", "init.hpp", "input.bin", "weight.bin"]
+        if not args.build_only:
+            required.append("expected.bin")
+        for name in required:
+            if not (generated_dir / name).is_file():
+                raise SystemExit(f"missing saved artifact: {generated_dir / name}")
+        expected = ()
+        if not args.build_only:
+            raw = (generated_dir / "expected.bin").read_bytes()
+            if not raw or len(raw) % 2:
+                raise SystemExit("expected.bin must contain nonempty little-endian BF16 values")
+            expected = struct.unpack(f"<{len(raw)//2}H", raw)
+        print(f"REUSE {generated_dir} (no PyTorch export or quantization)")
+    else:
+        generated_dir = build_dir / "generated"
+        expected = generate(args.model_file, generated_dir)
     build(args, generated_dir, build_dir)
     print(f"BUILT {build_dir / 'llama.elf'}")
     if not args.build_only:

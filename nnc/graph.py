@@ -117,6 +117,9 @@ def export_graph(model: Any, args: tuple[Any, ...]) -> Graph:
 class ExportGraphReader:
     OP_TARGETS = {
         ("nnedge::linear_fp4", "default"): "linear_fp4",
+        ("nnedge::linear_q8_0", "default"): "linear_q8_0",
+        ("nnedge::linear_fp8_e4m3fn", "default"): "linear_fp8_e4m3fn",
+        ("nnedge::linear_fp8_e5m2", "default"): "linear_fp8_e5m2",
         ("nnedge::rms_norm", "default"): "rms_norm",
         ("nnedge::linear", "default"): "linear",
         ("nnedge::rope", "default"): "rope",
@@ -205,6 +208,9 @@ class ExportGraphReader:
     def args_and_attrs(self, op: str, node: Any) -> tuple[tuple[str, ...], dict[str, str]]:
         attrs: dict[str, str] = {}
         raw_args = list(node.args)
+        if op in ("linear_fp4", "linear_q8_0", "linear_fp8_e4m3fn", "linear_fp8_e5m2"):
+            if raw_args and raw_args[-1] is None:
+                raw_args.pop()
         if op == "rms_norm":
             attrs["eps"] = self.float_literal(raw_args.pop())
         if op == "attention":

@@ -51,6 +51,27 @@ def write_artifacts(abi: ForwardABI, program: LoweredProgram,
     (out_dir / "weight.bin").write_bytes(weights.data)
 
 
+def compile(model: Any, example_args: tuple[Any, ...], *,
+            out_dir: Path | str = "build/generated", save_reference: bool = False) -> Path:
+    """Export C++/payloads; optionally snapshot the BF16 reference for replay."""
+    destination = Path(out_dir)
+    abi = ForwardABI.from_example(model, example_args)
+    program, weights = compile_model(model, example_args)
+    write_artifacts(abi, program, weights, destination)
+    if save_reference:
+        import struct
+        import torch
+        with torch.no_grad():
+            output = model(*example_args)
+        if isinstance(output, tuple) and len(output) == 1:
+            output = output[0]
+        if not isinstance(output, torch.Tensor):
+            raise ValueError("saved reference requires a single tensor output")
+        bits = output.detach().to(torch.bfloat16).cpu().contiguous().view(torch.int16).flatten().tolist()
+        (destination / "expected.bin").write_bytes(struct.pack(f"<{len(bits)}H", *(b & 0xffff for b in bits)))
+    return destination
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", type=Path, default=Path("example/llama/build/generated"))
@@ -62,9 +83,7 @@ def main() -> None:
     args = parser.parse_args()
 
     model, example_args = load_model_example(args.model_file)
-    abi = ForwardABI.from_example(model, example_args)
-    program, weights = compile_model(model, example_args)
-    write_artifacts(abi, program, weights, args.out_dir)
+    compile(model, example_args, out_dir=args.out_dir)
 
 
 if __name__ == "__main__":

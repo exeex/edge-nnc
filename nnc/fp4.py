@@ -71,7 +71,10 @@ def round_bf22(value):
 
 
 @torch.library.custom_op('nnedge::linear_fp4', mutates_args=())
-def linear_fp4(x: torch.Tensor, q: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+def linear_fp4(x: torch.Tensor, q: torch.Tensor, scale: torch.Tensor | None = None) -> torch.Tensor:
+    if scale is None:
+        q, scale = quantize(q)
+        q, scale = q.to(x.device), scale.to(x.device)
     # Normal-range numerical reference: BF22 dot, multiply, and partial sum.
     # Public output is rounded to BF16 only after the final tile.
     result = torch.zeros((*x.shape[:-1], q.shape[0]), device=x.device)
@@ -83,5 +86,5 @@ def linear_fp4(x: torch.Tensor, q: torch.Tensor, scale: torch.Tensor) -> torch.T
 
 
 @linear_fp4.register_fake
-def _(x, q, scale):
+def _(x, q, scale=None):
     return x.new_empty((*x.shape[:-1], q.shape[0]))
