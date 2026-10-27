@@ -34,7 +34,8 @@ from nnc.weights import WeightRecord, WeightStore
 
 
 def compile_model(model: Any, example_args: tuple[Any, ...]) -> tuple[LoweredProgram, WeightStore]:
-    lowerer = Lowerer(export_graph(model, example_args), dict(model.named_parameters()))
+    constants = dict(model.named_parameters()) | dict(model.named_buffers())
+    lowerer = Lowerer(export_graph(model, example_args), constants)
     return lowerer.lower(), lowerer.weights
 
 

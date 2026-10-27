@@ -2,15 +2,17 @@
 import torch
 from nnc.fp4 import linear_fp4
 from nnc.quant import linear_q8_0, linear_fp8_e4m3fn, linear_fp8_e5m2
+from nnc.microscale import linear_mxfp4, linear_nvfp4
 
 
 class _QuantLinear(torch.nn.Module):
+    group_k = 32
     def __init__(self, linear: torch.nn.Linear):
         super().__init__()
         if not isinstance(linear, torch.nn.Linear):
             raise TypeError('expected torch.nn.Linear')
-        if min(linear.in_features, linear.out_features) <= 0 or linear.in_features % 32 or linear.out_features % 8:
-            raise ValueError('quant Linear requires in_features%32=0 and out_features%8=0')
+        if min(linear.in_features, linear.out_features) <= 0 or linear.in_features % self.group_k or linear.out_features % 8:
+            raise ValueError(f'quant Linear requires in_features%{self.group_k}=0 and out_features%8=0')
         self.in_features = linear.in_features
         self.out_features = linear.out_features
         self.weight = torch.nn.Parameter(linear.weight.detach().to(torch.bfloat16).clone(), requires_grad=False)
@@ -39,3 +41,12 @@ class LinearFp8E4M3FN(_QuantLinear):
 
 class LinearFp8E5M2(_QuantLinear):
     op = staticmethod(linear_fp8_e5m2)
+
+
+class LinearMxFp4(_QuantLinear):
+    op = staticmethod(linear_mxfp4)
+
+
+class LinearNvFp4(_QuantLinear):
+    group_k = 16
+    op = staticmethod(linear_nvfp4)

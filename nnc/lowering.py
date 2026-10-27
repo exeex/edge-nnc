@@ -195,6 +195,47 @@ class LinearQuantLowerer(OpLowerer):
                            dram_preferred=(x.name, node.outputs[0]) if x.shape[0] > 1 else ())
 
 
+class LinearMicroscaleLowerer(OpLowerer):
+    def __init__(self, spec):
+        self.spec = spec
+
+    def lower(self, node, tensors, weights):
+        from nnc.microscale import group_k, quantize, pack_slots, global_bits
+        size = group_k(self.spec)
+        explicit = 3 if self.spec == 'mxfp4' else 4
+        if len(node.args) not in (2, explicit):
+            raise SystemExit('microscale Linear requires static weight or explicit codes/scales/global')
+        x, w = (tensors.require(name) for name in node.args[:2])
+        if len(x.shape) != 2 or len(w.shape) != 2:
+            raise SystemExit('microscale Linear requires rank-two operands')
+        n,k = w.shape
+        slot_bytes = 144 if self.spec == 'mxfp4' else 80
+        output_bytes = 2 if self.spec == 'mxfp4' else 4
+        if min(n,k,x.shape[0]) <= 0 or n%8 or k%size or x.shape[1] != k:
+            raise SystemExit('microscale Linear shape/group mismatch')
+        if ((2*k+63)//64*64 + (output_bytes*n+63)//64*64 + 128 + 4*slot_bytes) > 32768:
+            raise SystemExit('microscale Linear operands exceed DTCM scratch capacity')
+        params = [tensors.require(name) for name in node.args[1:]]
+        if any(p.target not in weights.parameters for p in params):
+            raise SystemExit('microscale weights/scales must be static')
+        if len(node.args) == 2:
+            q,scale,global_scale = quantize(weights.parameters[w.target],self.spec)
+        else:
+            q,scale = (weights.parameters[p.target] for p in params[:2])
+            global_scale = (torch.tensor(1.,dtype=torch.float32) if self.spec == 'mxfp4' else
+                            weights.parameters[params[2].target])
+        payload = pack_slots(q,scale,self.spec)
+        packed = TensorSpec('_'.join(node.args[1:])+'_'+self.spec+'_slots',(len(payload),),'synthetic')
+        if packed.name not in weights.records:
+            padding = (-weights.cursor)%16
+            weights.data.extend(bytes(padding)); weights.cursor += padding
+            weights.use_payload(packed,payload,'uint8_t')
+        return LoweredNode((self.output(node.outputs[0],(x.shape[0],n)),),
+            'linear_'+self.spec,(x.name,),{'packed':packed.name,'n':str(n),
+            'global_bits':f'0x{global_bits(global_scale):08x}u'},
+            dram_preferred=(x.name,node.outputs[0]) if x.shape[0] > 1 else ())
+
+
 class LinearFP4Lowerer(LinearQuantLowerer):
     def __init__(self):
         super().__init__("fp4")
@@ -297,6 +338,8 @@ OP_LOWERERS: dict[str, OpLowerer] = {
     "rms_norm": RmsNormLowerer(),
     "linear": LinearLowerer(),
     "linear_fp4": LinearFP4Lowerer(),
+    "linear_mxfp4": LinearMicroscaleLowerer('mxfp4'),
+    "linear_nvfp4": LinearMicroscaleLowerer('nvfp4'),
     "linear_q8_0": LinearQuantLowerer("q8_0"),
     "linear_fp8_e4m3fn": LinearQuantLowerer("fp8_e4m3fn"),
     "linear_fp8_e5m2": LinearQuantLowerer("fp8_e5m2"),

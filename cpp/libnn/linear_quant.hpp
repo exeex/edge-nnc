@@ -8,6 +8,10 @@ namespace nnedge {
 // These are runtime layouts, not file-format decoders.
 constexpr unsigned kQuantByteWeightScaleType = 0;
 using FP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4, 0, 4, 8>;
+using MXFP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4, EDGE_TENSOR_STYPE_MXFP4, 4, 8>;
+using NVFP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4, EDGE_TENSOR_STYPE_NVFP4, 2, 8>;
+static_assert(sizeof(MXFP4WeightPack) == 144 && sizeof(NVFP4WeightPack) == 80,
+              "native byte scales with aligned transport slots");
 using Q8_0WeightPack = WeightPack<EDGE_TENSOR_WTYPE_INT8, kQuantByteWeightScaleType, 4, 8>;
 using FP8E4M3FNWeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E4M3FN, kQuantByteWeightScaleType, 4, 8>;
 using FP8E5M2WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E5M2, kQuantByteWeightScaleType, 4, 8>;
@@ -16,6 +20,17 @@ static_assert(sizeof(Q8_0WeightPack) == 272 && sizeof(FP8E4M3FNWeightPack) == 27
 
 namespace op {
 using FP4SlotLayout = WeightSlotLayout<EDGE_TENSOR_WTYPE_FP4>;
+
+inline bool linear_mxfp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x, Tensor<uint8_t> slots)
+{
+    return linear_weight_slots<MXFP4WeightPack>(y,x,slots);
+}
+
+inline bool linear_nvfp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
+                        Tensor<uint8_t> slots, uint32_t global_scale_bits)
+{
+    return detail::linear_weight_slots_bytes<NVFP4WeightPack>(y,x,slots,global_scale_bits);
+}
 
 inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<FP4WeightPack> slots)

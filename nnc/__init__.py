@@ -1,5 +1,5 @@
 """PyTorch export and lowering tools for edge-e3."""
-from nnc.modules import LinearFp4, LinearQ8_0, LinearFp8E4M3FN, LinearFp8E5M2
+from nnc.modules import LinearFp4, LinearQ8_0, LinearFp8E4M3FN, LinearFp8E5M2, LinearMxFp4, LinearNvFp4
 
 
 def compile(model, example_args, *, out_dir="build/generated", save_reference=False):

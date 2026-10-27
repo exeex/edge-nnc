@@ -333,7 +333,9 @@ class ForwardRenderer:
                     f"ctx->{node.attrs['square_weight']}, "
                     f"{node.attrs['eps']})"
                 )
-            case "linear_fp4" | "linear_q8_0" | "linear_fp8_e4m3fn" | "linear_fp8_e5m2":
+            case "linear_nvfp4":
+                return f"if (!nnedge::op::{node.op}({outs}, {args}, ctx->{node.attrs['packed']}, {node.attrs['global_bits']})) return 1"
+            case "linear_fp4" | "linear_mxfp4" | "linear_q8_0" | "linear_fp8_e4m3fn" | "linear_fp8_e5m2":
                 return f"if (!nnedge::op::{node.op}({outs}, {args}, ctx->{node.attrs['packed']})) return 1"
             case "linear":
                 return (

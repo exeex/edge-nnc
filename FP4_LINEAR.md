@@ -1,5 +1,11 @@
 # FP4 Linear with BF16 scale
 
+Native byte-scale alternatives are now `nnc.LinearMxFp4` (K32 E8M0) and
+`nnc.LinearNvFp4` (K16 E4M3FN plus FP32 tensor scale). The original
+`LinearFp4` remains the BF16-scale preset. See
+[MICROSCALE_LINEAR.md](MICROSCALE_LINEAR.md) for their storage and numerical
+contracts; these require the matching WSLD stype decoder in E3/Edge32.
+
 Use `nnc.LinearFp4(torch.nn.Linear(...))` in a model to replace a standard
 Linear with an explicit `nnedge::linear_fp4` custom op. The module copies the
 source weight and optional bias into frozen BF16 inference parameters; NNC

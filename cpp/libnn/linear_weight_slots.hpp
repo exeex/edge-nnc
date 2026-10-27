@@ -27,11 +27,28 @@ inline size_t weight_psum_bytes(size_t rows)
 }
 
 namespace detail {
+// The bare-metal compiler uses a soft-float ABI. Explicit scalar FP32 ISA
+// keeps this epilogue independent of compiler-rt __mulsf3 support.
+inline uint32_t weight_global_scale_bits(uint32_t value, uint32_t scale)
+{
+    uint32_t result;
+    __asm__ volatile(
+        ".option push\n.option arch, +f\n"
+        "fmv.w.x ft0, %1\nfmv.w.x ft1, %2\n"
+        "fmul.s ft0, ft0, ft1, rne\nfmv.x.w %0, ft0\n.option pop"
+        : "=r"(result) : "r"(value), "r"(scale) : "ft0", "ft1");
+    return result;
+}
+
 template <typename Pack>
 inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
-                       Tensor<uint8_t> slots)
+                       Tensor<uint8_t> slots, uint32_t global_scale_bits = 0x3f800000u)
 {
     using L = Pack;
+    constexpr bool global_epilogue = L::stype == EDGE_TENSOR_STYPE_NVFP4;
+    constexpr size_t output_bytes = global_epilogue ? 4u : 2u;
+    if (global_epilogue && (!global_scale_bits || global_scale_bits >= 0x7f800000u))
+        return false;
     constexpr unsigned ring_slots = 4;
     if (x.shape.rank != 2 || y.shape.rank != 2) return false;
     const size_t rows = x.shape.dims[0], k = x.shape.dims[1], n = y.shape.dims[1];
@@ -42,14 +59,14 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
     // As in BF16 Matmul, one weight tile serves an entire token chunk.
     // Blocked I/O is private; the public tensors stay contiguous [M,K]/[M,N].
     size_t capacity = rows < 64u ? rows : 64u;
-    while (capacity && align_bytes(capacity*k*2) + align_bytes(capacity*n*2)
+    while (capacity && align_bytes(capacity*k*2) + align_bytes(capacity*n*output_bytes)
            + weight_psum_bytes(capacity) + ring_slots*L::slot_bytes > kDtcmOpScratchBytes)
         --capacity;
     if (!capacity) return false;
     auto *scratch = dtcm_op_scratch<unsigned char>();
     auto *input = reinterpret_cast<bfloat16_t *>(scratch);
     auto *output = reinterpret_cast<bfloat16_t *>(scratch+align_bytes(capacity*k*2));
-    auto *psum = reinterpret_cast<unsigned char *>(output)+align_bytes(capacity*n*2);
+    auto *psum = reinterpret_cast<unsigned char *>(output)+align_bytes(capacity*n*output_bytes);
     auto *ring = psum+weight_psum_bytes(capacity);
     const bool input_dtcm = is_dtcm_addr(x.data), output_dtcm = is_dtcm_addr(y.data);
     if (!input_dtcm) edge_dcache_clean_range(x.data, rows*k*2);
@@ -66,7 +83,7 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
                 edge_dma_start(x.data+base*k, input, k*2);
                 edge_dma_sync();
             }
-            if (output_dtcm) ys=y.data+base*n;
+            if (output_dtcm && !global_epilogue) ys=y.data+base*n;
         } else {
             // Gather [token,K] into [K/8,token,8] before leasing circular DMA.
             for (size_t kb=0; kb<k/8; ++kb) {
@@ -100,13 +117,17 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
             for (size_t kb=0; kb<k/8; ++kb) {
                 edge_tensor_setin(xs+kb*batch*8);
                 const bool last = kb+1 == k/8;
-                if (last) edge_tensor_setout(ys+ob*batch*8);
+                if (last) edge_tensor_setout(global_epilogue ?
+                    reinterpret_cast<void *>(reinterpret_cast<float *>(output)+ob*batch*8) :
+                    reinterpret_cast<void *>(ys+ob*batch*8));
                 if (kb==0 && last)
-                    edge_tensor_start<scale_mode | EDGE_TENSOR_START_SINGLE_TILE>();
+                    edge_tensor_start<scale_mode | EDGE_TENSOR_START_SINGLE_TILE |
+                        (global_epilogue ? EDGE_TENSOR_START_OPT_TILE_OUTPUT_FP32 : 0)>();
                 else if (kb==0)
                     edge_tensor_start<scale_mode | EDGE_TENSOR_START_FIRST_TILE>();
                 else if (last)
-                    edge_tensor_start<scale_mode | EDGE_TENSOR_START_LAST_TILE>();
+                    edge_tensor_start<scale_mode | EDGE_TENSOR_START_LAST_TILE |
+                        (global_epilogue ? EDGE_TENSOR_START_OPT_TILE_OUTPUT_FP32 : 0)>();
                 else
                     edge_tensor_start<scale_mode | EDGE_TENSOR_START_PSUM_TILE>();
                 if constexpr (!L::scaled) {
@@ -116,11 +137,28 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
         }
         edge_tensor_sync();
         edge_dma_sync();
+        if constexpr (global_epilogue) {
+            // Preserve BF22 output until the single FP32 global scale has been
+            // applied. Compact forward in-place before the existing scatter.
+            auto *wide = reinterpret_cast<volatile uint32_t *>(output);
+            for (size_t i=0;i<batch*n;++i) {
+                uint32_t bits = weight_global_scale_bits(wide[i],global_scale_bits);
+                if ((bits & 0x7fffffffu) > 0x7f800000u) bits = 0x7fc00000u;
+                else bits += 0x7fffu + ((bits >> 16) & 1u);
+                output[i] = bfloat16_t::from_bits(static_cast<uint16_t>(bits >> 16));
+            }
+        }
         // Restore [token,N] only after all circular consumers have retired.
         if (batch==1) {
-            if (ys != y.data+base*n)
-                copy(Tensor<bfloat16_t>(Shape(n), y.data+base*n),
-                     Tensor<bfloat16_t>(Shape(n), ys));
+            if (ys != y.data+base*n) {
+                if (output_dtcm) {
+                    for (size_t ob=0;ob<n/8;++ob)
+                        weight_copy_vector(y.data+base*n+ob*8,ys+ob*8);
+                } else {
+                    copy(Tensor<bfloat16_t>(Shape(n), y.data+base*n),
+                         Tensor<bfloat16_t>(Shape(n), ys));
+                }
+            }
         } else {
             for (size_t token=0; token<batch; ++token) {
                 if (!output_dtcm) {

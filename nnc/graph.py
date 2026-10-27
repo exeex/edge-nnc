@@ -117,6 +117,8 @@ def export_graph(model: Any, args: tuple[Any, ...]) -> Graph:
 class ExportGraphReader:
     OP_TARGETS = {
         ("nnedge::linear_fp4", "default"): "linear_fp4",
+        ("nnedge::linear_mxfp4", "default"): "linear_mxfp4",
+        ("nnedge::linear_nvfp4", "default"): "linear_nvfp4",
         ("nnedge::linear_q8_0", "default"): "linear_q8_0",
         ("nnedge::linear_fp8_e4m3fn", "default"): "linear_fp8_e4m3fn",
         ("nnedge::linear_fp8_e5m2", "default"): "linear_fp8_e5m2",
@@ -137,6 +139,8 @@ class ExportGraphReader:
 
     def __init__(self, exported: Any) -> None:
         self.exported = exported
+        if getattr(exported.graph_signature, 'buffers_to_mutate', {}):
+            raise SystemExit('mutable model buffers are not static weights')
         self.placeholder_names = self.read_placeholder_names()
         self.names: dict[Any, str] = {}
         self.static_tensors: list[TensorSpec] = []
@@ -150,7 +154,7 @@ class ExportGraphReader:
                 continue
             name = str(arg.name)
             kind = str(spec.kind)
-            if "PARAMETER" in kind:
+            if "PARAMETER" in kind or "BUFFER" in kind:
                 names[name] = (self.cpp_name(spec.target), "param", spec.target)
             elif "USER_INPUT" in kind:
                 names[name] = (name, "input", "")
@@ -208,8 +212,8 @@ class ExportGraphReader:
     def args_and_attrs(self, op: str, node: Any) -> tuple[tuple[str, ...], dict[str, str]]:
         attrs: dict[str, str] = {}
         raw_args = list(node.args)
-        if op in ("linear_fp4", "linear_q8_0", "linear_fp8_e4m3fn", "linear_fp8_e5m2"):
-            if raw_args and raw_args[-1] is None:
+        if op in ("linear_fp4", "linear_mxfp4", "linear_nvfp4", "linear_q8_0", "linear_fp8_e4m3fn", "linear_fp8_e5m2"):
+            while raw_args and raw_args[-1] is None:
                 raw_args.pop()
         if op == "rms_norm":
             attrs["eps"] = self.float_literal(raw_args.pop())

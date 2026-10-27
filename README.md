@@ -1,5 +1,10 @@
 # Edge NNC
 
+Native weight-only `LinearMxFp4` and `LinearNvFp4` use WSLD E8M0/E4M3FN
+scale decoding, with a separate FP32 global-scale epilogue for NVFP4. See
+[MICROSCALE_LINEAR.md](MICROSCALE_LINEAR.md) for required hardware, group sizes,
+aligned runtime storage and numerical limits.
+
 PyTorch graph lowering, generated C++ ABI, RV32 runtime, model fixtures and
 correctness runners. Compiler and runtime are one versioned unit.
 
