@@ -28,11 +28,41 @@ inline size_t mm_scratch_bytes(size_t rows, size_t k, size_t n, bool input_sram,
          + align_bytes(staged_rows*n*4)+kMatmulRingBytes;
 }
 
+// START snapshots its configuration and copies it forward to the next CSR
+// bank (edge_tensor_unit.v). Invariant pointers need not be reissued per tile.
+template <bool Transposed>
+__attribute__((always_inline)) inline void mm_next_weight(size_t &tiles_left)
+{
+    if (--tiles_left) {
+        if constexpr (Transposed) edge_tensor_wld_circular();
+        else edge_tensor_wld_t_circular();
+    }
+}
+
+template <unsigned Mode, bool Transposed>
+__attribute__((always_inline)) inline void mm_output_blocks(
+    bfloat16_t *input, bfloat16_t *output, float *psum,
+    size_t output_step, size_t psum_step, size_t blocks, size_t &tiles_left)
+{
+    edge_tensor_setin(input);
+    for (size_t ob=0; ob<blocks; ++ob) {
+        if constexpr (Mode != EDGE_TENSOR_START_FIRST_TILE && Mode != EDGE_TENSOR_START_SINGLE_TILE)
+            edge_tensor_setpsum(psum);
+        if constexpr (Mode == EDGE_TENSOR_START_LAST_TILE || Mode == EDGE_TENSOR_START_SINGLE_TILE)
+            edge_tensor_setout(output);
+        else edge_tensor_setout(psum);
+        edge_tensor_start<Mode>();
+        mm_next_weight<Transposed>(tiles_left);
+        output += output_step;
+        psum += psum_step;
+    }
+}
+
 // Single storage contract: LHS/output are compiler-planned tensor tiles.
 // RHS remains the unmodified runtime row-major BF16 matrix in DRAM.
 template <unsigned MaxTokens, bool InputSram, bool OutputSram, bool Transposed>
-inline bool matmul_tiles(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
-                           Tensor<bfloat16_t> rhs, size_t heads)
+inline bool matmul_tiles(const Tensor<bfloat16_t> &y, const Tensor<bfloat16_t> &lhs,
+                           const Tensor<bfloat16_t> &rhs, size_t heads)
 {
     constexpr bool transposed = Transposed;
     static_assert(MaxTokens > 0, "token capacity must be positive");
@@ -111,30 +141,43 @@ inline bool matmul_tiles(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
             auto *y_base = output_sram ? y.data+(head*ob_count*rows+base)*8 : output;
             const size_t x_step = (input_sram ? rows : batch)*8;
             const size_t y_step = (output_sram ? rows : batch)*8;
-            auto submit = [&](size_t kb,size_t ob) __attribute__((always_inline)) {
-                auto *xp = x_base+kb*x_step;
-                auto *yp = y_base+ob*y_step;
-                float *pp = psum+ob*((batch+3u)&~3u)*8;
-                edge_tensor_setin(xp);
-                edge_tensor_setpsum(pp);
-                edge_tensor_setout(kb+1 == kb_count ? static_cast<void *>(yp) : static_cast<void *>(pp));
-                if (kb_count == 1) edge_tensor_start<EDGE_TENSOR_START_SINGLE_TILE>();
-                else if (kb == 0) edge_tensor_start<EDGE_TENSOR_START_FIRST_TILE>();
-                else if (kb+1 == kb_count) edge_tensor_start<EDGE_TENSOR_START_LAST_TILE>();
-                else edge_tensor_start<EDGE_TENSOR_START_PSUM_TILE>();
-                if (--tiles_left) {
-                    if (transposed) edge_tensor_wld_circular();
-                    else edge_tensor_wld_t_circular();
-                }
-            };
-            // Loop interchange follows DMA tile order; only command/parameter
-            // loops run on the CPU. No software loop loads or stores elements.
-            if (transposed) {
-                for (size_t kb=0; kb<kb_count; ++kb)
-                    for (size_t ob=0; ob<ob_count; ++ob) submit(kb,ob);
+            const size_t p_step = ((batch+3u)&~3u)*8;
+            if (kb_count == 1) {
+                mm_output_blocks<EDGE_TENSOR_START_SINGLE_TILE,Transposed>(
+                    x_base,y_base,psum,y_step,p_step,ob_count,tiles_left);
+            } else if constexpr (Transposed) {
+                // The input vector stream is shared by every output block at
+                // a fixed K block. Peel K boundaries to make modes constant.
+                mm_output_blocks<EDGE_TENSOR_START_FIRST_TILE,true>(
+                    x_base,y_base,psum,y_step,p_step,ob_count,tiles_left);
+                auto *xp=x_base+x_step;
+                for (size_t kb=1;kb+1<kb_count;++kb,xp+=x_step)
+                    mm_output_blocks<EDGE_TENSOR_START_PSUM_TILE,true>(
+                        xp,y_base,psum,y_step,p_step,ob_count,tiles_left);
+                mm_output_blocks<EDGE_TENSOR_START_LAST_TILE,true>(
+                    xp,y_base,psum,y_step,p_step,ob_count,tiles_left);
             } else {
-                for (size_t ob=0; ob<ob_count; ++ob)
-                    for (size_t kb=0; kb<kb_count; ++kb) submit(kb,ob);
+                // P and intermediate output stay fixed throughout one K
+                // reduction. Only the final tile redirects output to BF16 Y.
+                auto *pp=psum;
+                auto *yp=y_base;
+                for (size_t ob=0;ob<ob_count;++ob,pp+=p_step,yp+=y_step) {
+                    edge_tensor_setpsum(pp);
+                    edge_tensor_setout(pp);
+                    edge_tensor_setin(x_base);
+                    edge_tensor_start<EDGE_TENSOR_START_FIRST_TILE>();
+                    mm_next_weight<false>(tiles_left);
+                    auto *xp=x_base+x_step;
+                    for (size_t kb=1;kb+1<kb_count;++kb,xp+=x_step) {
+                        edge_tensor_setin(xp);
+                        edge_tensor_start<EDGE_TENSOR_START_PSUM_TILE>();
+                        mm_next_weight<false>(tiles_left);
+                    }
+                    edge_tensor_setin(xp);
+                    edge_tensor_setout(yp);
+                    edge_tensor_start<EDGE_TENSOR_START_LAST_TILE>();
+                    mm_next_weight<false>(tiles_left);
+                }
             }
             edge_tensor_sync();
             edge_dma_sync();
@@ -171,8 +214,8 @@ inline bool matmul_tiles(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
 // Residency only selects scratch allocation. Every specialization uses the
 // same tiled operand contract and runtime row-major RHS DMA slicing.
 template <unsigned MaxTokens, bool Transposed>
-inline bool matmul_dispatch(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
-                           Tensor<bfloat16_t> rhs, size_t heads)
+inline bool matmul_dispatch(const Tensor<bfloat16_t> &y, const Tensor<bfloat16_t> &lhs,
+                           const Tensor<bfloat16_t> &rhs, size_t heads)
 {
     if (is_dtcm_addr(lhs.data)) {
         if (is_dtcm_addr(y.data)) return matmul_tiles<MaxTokens,true,true,Transposed>(y,lhs,rhs,heads);
@@ -183,14 +226,14 @@ inline bool matmul_dispatch(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
 }
 
 template <unsigned MaxTokens = 128>
-inline void matmul(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
-                   Tensor<bfloat16_t> rhs, size_t heads=1)
+inline void matmul(const Tensor<bfloat16_t> &y, const Tensor<bfloat16_t> &lhs,
+                   const Tensor<bfloat16_t> &rhs, size_t heads=1)
 {
     if (!matmul_dispatch<MaxTokens,false>(y,lhs,rhs,heads)) alloc_failed() = true;
 }
 template <unsigned MaxTokens = 128>
-inline void matmul_transpose(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
-                             Tensor<bfloat16_t> rhs, size_t heads=1)
+inline void matmul_transpose(const Tensor<bfloat16_t> &y, const Tensor<bfloat16_t> &lhs,
+                             const Tensor<bfloat16_t> &rhs, size_t heads=1)
 {
     if (!matmul_dispatch<MaxTokens,true>(y,lhs,rhs,heads)) alloc_failed() = true;
 }
