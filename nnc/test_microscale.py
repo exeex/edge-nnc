@@ -91,7 +91,7 @@ class MicroscaleTest(unittest.TestCase):
             record=weights.records[node.attrs['packed']]
             self.assertEqual(bytes(weights.data[record.offset:record.offset+record.nbytes]),pack_slots(q,scale,spec))
             code=compiler.ForwardRenderer(program,compiler.ForwardABI.from_example(model,args),weights).render()
-            self.assertIn('nnedge::op::linear_'+spec+'(',code)
+            self.assertIn('nnedge::op::linear_'+spec+'<64, true>(',code)
             if spec=='nvfp4':self.assertIn(f'0x{global_bits(global_scale):08x}u',code)
             zero,_,_=quantize(torch.zeros(8,width),spec)
             self.assertTrue(torch.equal(zero,torch.zeros_like(zero)))

@@ -50,75 +50,77 @@ allocates a fixed RHS ring, not a full SRAM copy of RHS. Scratch avoids the
 allocator high-water mark and explicitly supplied working SRAM tensors.
 All engines finish before a ring or scratch region is reused.
 
-Two IO contracts are explicit:
+## One Matmul contract
 
-- Default contiguous tensors use DMA input staging/output restoration, like
-  the original runtime Matmul tests. They do not use SRAM-to-SRAM COPY.
-- `TensorTileView` LHS/output use preplanned working SRAM directly, with no
-  internal IO staging. The RHS remains a normal contiguous DRAM tensor.
+`matmul(y, lhs, rhs, heads)` and `matmul_transpose(y, lhs, rhs, heads)` each
+have one public Tensor API and one physical storage contract:
 
-The planned compiler mode supports a single BF16 Matmul operator, including
-explicit heads and transpose, with complete LHS/output fitting the SRAM
-tensor arena:
+- RHS is the complete row-major BF16 matrix in DRAM. NNC does not quantize,
+  transpose or pre-tile it. Hardware strided circular DMA slices it at runtime.
+- LHS and output use the tensor engine's SRAM order: `[channel/8, token, 8]`,
+  with an optional outer head axis. Tensor commands address these SRAM vectors.
+- For the measured 64×64×128 workload, input/output remain in SRAM throughout
+  the operator. There is no internal input/output DMA or SRAM-to-SRAM COPY.
+- If an operand exceeds SRAM, the same storage contract is streamed in bounded
+  token chunks. Complete chunks use ordinary DMA; partial input slices use
+  source-strided DMA. Partial DRAM output writes use contiguous bursts per
+  channel block because the DMA interface has no destination-stride field.
+
+There is no `TensorTileView` Matmul overload, contiguous Matmul fallback,
+compiler layout-mode flag, or contiguous/planned benchmark pair. C++ residency
+specialization only eliminates scratch/staging branches for SRAM operands;
+it does not introduce a different layout or algorithm.
 
 ```python
 nnc.compile(model, (lhs, rhs), out_dir="build/matmul",
-            save_reference=True, tensor_tile_io=True,
-            matmul_token_capacity=128)
+            save_reference=True, matmul_token_capacity=128)
 ```
 
-NNC plans **only LHS/output** storage. It leaves the runtime RHS byte-for-byte
-contiguous in input.bin, with no static weight payload. `io_layout.json`
-describes each input separately. Generated code copies planned LHS/output
-with ordinary DMA and calls the working-SRAM overload. Dynamic producers
-must follow the chosen physical IO ABI; whole-graph layout propagation is
-not implemented by this single-op mode. Default contiguous export is unchanged.
+NNC's `nnc/layout.py` assigns storage on graph edges. Compatible pointwise
+producers/consumers preserve tensor order directly. RHS producers write
+row-major DRAM storage. Attention expands into Matmul-transpose, softmax, and
+Matmul so their layout and memory boundaries remain visible to the compiler.
+A boundary to an operator with a different required layout uses explicit DMA
+XY descriptors; it never uses scalar payload loops or SRAM-to-SRAM Tensor
+COPY. These boundary costs are included in generated per-node profiling.
+
+`io_layout.json` describes every external tensor's physical storage. Exported
+input bytes, output storage and `expected.bin` follow this metadata; logical
+PyTorch shapes remain unchanged. Consumers of generated payloads must use
+this compiler-owned ABI. Matmul RHS is separately verified byte-for-byte as
+row-major, and its `weight.bin` is empty.
 
 ## Verification and measurements
 
 ```sh
-python nnc/benchmark_matmul.py \
-  --out-dir build/matmul-dma-owned \
+python nnc/benchmark_tensor.py \
+  --out-dir build/tensor-operator-unified \
   --sim-exe /path/to/Vedge32_tensor_integration_tb \
   --edge32-include /path/to/edge-32/include \
   --e3-include /path/to/edge-e3/include
 ```
 
-This compares capacities 32/64/128 and contiguous/planned IO for both BF16
-operations with 64×64 RHS and 128 tokens. It checks exact output values,
-MAC and descriptor counts, zero Tensor COPY starts, and each circular
-command's fragment/entry/X/Y/slot configuration. It verifies that exported
-RHS bytes are untouched and weight.bin is empty. Separate two-invocation
-tests modify RHS in DRAM after the first invocation and compare the second
-result, proving that the kernel uses current runtime data.
+The combined report has one row per operator at capacity 128, followed by a
+32/64/128 capacity sweep using the same implementations. Matmul validates
+exact BF16 output, MAC/START counts, zero Tensor COPY, exact ring8 DMA XY
+parameters, and RHS mutation between two invocations.
 
-`--tokens 129 --heads 2 --n 16 --capacity 128` additionally exercises
-multiple heads, rectangular RHS, and a one-token tail. Both IO contracts
-and transpose directions pass these checks. Existing multihead/tail CTest
-cases and the quant Linear regressions also pass.
+`benchmark_matmul.py --tokens 129 --heads 2 --n 16 --capacity 128` additionally
+checks multiple heads, rectangular RHS and the final one-token chunk.
+`smoke_matmul_pipeline.py`, `smoke_matmul_large.py`, attention and transformer
+regressions cover graph layout propagation, runtime-produced RHS, and tensors
+larger than SRAM.
 
-Measured 2026-10-28, E3 `851bc5b6`, Edge-32 `55a089b3`, LLVM 22.1.8,
-RV32IM/Zba `-O2`, wide H4, ring8, 64×64 RHS × 128 tokens:
+The stream window begins before RHS DMA submission and ends after Tensor/DMA
+sync. Operator time also includes validation and setup. Ordinary harness
+input/output boundary DMA is outside this SRAM-operand timing. Ideal cycles
+for 64×64×128 are 8192 at 64 MACs/cycle. ASIC operators perform no D-cache
+maintenance under [MEMORY_OWNERSHIP.md](MEMORY_OWNERSHIP.md).
 
-| Planned working-SRAM IO | Stream cycles | Stream MAC utilization | Complete SRAM kernel cycles | Kernel MAC utilization |
-| --- | ---: | ---: | ---: | ---: |
-| Matmul | 8,787 | 93.23% | 9,653 | 84.86% |
-| Matmul-transpose | 8,839 | 92.68% | 9,677 | 84.65% |
+Measured results, compiler/source/simulator hashes, revisions/dirty state,
+generated artifacts and raw command traces are preserved in the consuming
+workspace's `build/tensor-operator-unified/`. Older reports retain their
+historical IO variants and must not be treated as the current API.
 
-Ideal cycles are 128×64×64/64 = 8192. Stream timing starts before RHS circular
-DMA submission and ends after both Tensor/DMA syncs. Kernel time includes
-validation and capacity/setup. ASIC/DMA operators perform no D-cache
-maintenance under the [tensor ownership contract](MEMORY_OWNERSHIP.md). Planned IO's ordinary
-boundary DMA is outside these measurements; contiguous operator measurements
-include their DMA staging/restoration and are labeled separately in the report.
-Profiling is opt-in with `NNEDGE_MATMUL_PROFILE=1`; printing follows timing.
-
-Source/compiler/simulator hashes, raw command traces, JSON/CSV/Markdown
-results and generated artifacts are in the consuming workspace's
-`build/matmul-dma-owned/` and `build/matmul-dma-owned-head-tail/`. A forced-inline
-parameter helper avoids scalar function-call overhead between tile starts;
-it performs no software payload slicing.
-
-Removing redundant operator cache maintenance reduced planned SRAM kernel
-cycles from 10,977 to 9,653 (Matmul) and 10,987 to 9,677 (transpose).
-The weight stream, DMA tile slicing, and hardware are unchanged.
+The checked-in measurement table and version manifest are in
+[benchmarks/tensor-64x64-128](benchmarks/tensor-64x64-128/README.md).

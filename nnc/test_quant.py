@@ -142,7 +142,7 @@ class QuantTest(unittest.TestCase):
                 self.assertEqual(record.ctype,'uint8_t')
                 abi = compiler.ForwardABI.from_example(model,args)
                 code = compiler.ForwardRenderer(program,abi,weights).render()
-                self.assertIn('nnedge::op::linear_'+spec+'(',code)
+                self.assertIn('nnedge::op::linear_'+spec+'<64, true>(',code)
                 self.assertEqual(len(node.dram_preferred),2)
                 with self.assertRaises(SystemExit):
                     compiler.compile_model(model,(args[0][:,:32],))
@@ -190,8 +190,8 @@ class QuantTest(unittest.TestCase):
             destination = nnc.compile(module,args,out_dir=directory)
             self.assertEqual(destination,Path(directory))
             self.assertEqual({p.name for p in destination.iterdir()},
-                             {'forward.hpp','init.hpp','input.bin','weight.bin'})
-            self.assertIn('nnedge::op::linear_q8_0(', (destination/'forward.hpp').read_text())
+                             {'forward.hpp','init.hpp','input.bin','weight.bin','io_layout.json'})
+            self.assertIn('nnedge::op::linear_q8_0<64, true>(', (destination/'forward.hpp').read_text())
             self.assertEqual(len((destination/'input.bin').read_bytes()),128)
             nnc.compile(module,args,out_dir=directory,save_reference=True)
             self.assertEqual(len((destination/'expected.bin').read_bytes()),32)

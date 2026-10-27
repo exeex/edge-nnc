@@ -99,7 +99,7 @@ class DramPreferenceTest(unittest.TestCase):
             node, tensors, compiler.WeightStore({})
         )
 
-        self.assertEqual(lowered.dram_preferred, ("lhs", "rhs", "out"))
+        self.assertEqual(lowered.dram_preferred, ("rhs",))
 
     def test_attention_lowerer_keeps_rhs_and_unused_params_in_dram(self) -> None:
         tensors = compiler.TensorTable()
@@ -145,10 +145,10 @@ class DramPreferenceTest(unittest.TestCase):
 
         rendered = compiler.ForwardRenderer(program, abi, weights).render()
 
-        self.assertIn(
-            "ctx->tensor_eye8, 2u)",
-            rendered,
-        )
+        self.assertIn("nnedge::op::matmul_transpose(out_scores, xq_dtcm, keys, 2u)", rendered)
+        self.assertIn("nnedge::op::matmul(out, layout_2_0, values, 2u)", rendered)
+        self.assertNotIn("nnedge::op::attention(", rendered)
+        self.assertIn("nnedge::op::softmax(out_prob, layout_1_0, ctx->tensor_eye8, 2u)", rendered)
 
     def test_kv_cache_lowerer_keeps_cache_outputs_in_dram(self) -> None:
         tensors = compiler.TensorTable()

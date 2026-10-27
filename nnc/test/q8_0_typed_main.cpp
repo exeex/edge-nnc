@@ -9,8 +9,12 @@ static_assert(sizeof(nnedge::Q8_0WeightPack) == 272);
 extern "C" int main()
 {
     model::init();
-    const auto x = model::mio::x;
-    const auto y = model::mio::y;
+    // This low-level typed-pack fixture deliberately exercises its contiguous
+    // storage contract; exported model payloads now carry compiler layouts.
+    nnedge::Tensor<nnedge::bfloat16_t> x(model::mio::x.shape), y(model::mio::y.shape);
+    nnedge::malloc_tensor_dram(x);
+    nnedge::malloc_tensor_dram(y);
+    if (!nnedge::convert_tensor_layout(x,model::mio::x,false)) return 2;
     nnedge::Tensor<nnedge::Q8_0WeightPack> slots(
         nnedge::Shape(y.shape.dims[1]/8, x.shape.dims[1]/32),
         reinterpret_cast<nnedge::Q8_0WeightPack *>(
@@ -22,5 +26,6 @@ extern "C" int main()
     edge_sim_printf("NNC_PROFILE\t0\tlinear_q8_0\tlinear_q8_0\t%llu\n",
                     (unsigned long long)cycles);
     edge_sim_printf("NNC_PROFILE_END\n");
-    return ok ? 0 : 1;
+    if (!ok || !nnedge::convert_tensor_layout(model::mio::y,y,true)) return 1;
+    return 0;
 }

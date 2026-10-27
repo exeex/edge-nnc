@@ -75,8 +75,13 @@ beside its main but ignores the larger binary payloads; its runner regenerates
 those on each run with `--generated-dir`. The four small quantized Linear
 examples continue to replay their Git-tracked headers and binary snapshots.
 
-For SRAM-native quant Linear, `nnc.compile(..., tensor_tile_io=True,
-quant_token_capacity=128)` exports a preplanned tensor-storage ABI for a
-single quant Linear. Its complete I/O uses ordinary DMA and its SRAM kernel
-performs no I/O staging copies. See [QUANT_LINEAR.md](QUANT_LINEAR.md#compile-time-capacity-and-preplanned-tensor-io)
-for the explicit layout contract, current graph/size limits and benchmark.
+NNC assigns tensor SRAM storage automatically. `nnc.compile(...,
+quant_token_capacity=128)` selects the quant token ceiling without a layout
+mode switch. Matmul and Matmul-transpose each have one Tensor API: full
+row-major BF16 RHS in DRAM, runtime hardware strided DMA tile slicing, and
+SRAM tensor operands. `io_layout.json` records physical external IO storage.
+See [MATMUL.md](MATMUL.md) and [QUANT_LINEAR.md](QUANT_LINEAR.md) for graph
+layout boundaries, capacity behavior and benchmark commands.
+
+Measured operator results and hardware/software revisions are maintained in
+[benchmarks/tensor-64x64-128](benchmarks/tensor-64x64-128/README.md).

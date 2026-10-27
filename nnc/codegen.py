@@ -7,6 +7,7 @@ import struct
 from nnc.graph import AbiValue, ForwardABI, LoweredNode, LoweredProgram, Shape
 from nnc.liveness import Liveness
 from nnc.weights import WeightStore
+from nnc.layout import LayoutPlan, TILED
 
 def tensor_tile_bits(bits, shape):
     """Compiler-planned [channel/8, token, 8] storage, logical [token,channel]."""
@@ -26,11 +27,9 @@ def tensor_tile_bits(bits, shape):
 
 
 class InitRenderer:
-    def __init__(self, abi: ForwardABI, weights: WeightStore, *, tensor_tile_io=False,
-                 tile_input_names=None) -> None:
+    def __init__(self, abi: ForwardABI, weights: WeightStore, *, tile_input_names=()) -> None:
         self.abi = abi
         self.weights = weights
-        self.tensor_tile_io = tensor_tile_io
         self.tile_input_names = tile_input_names
         self.input_offsets, self.input_data = self.layout_inputs()
         self.output_offsets, self.output_bytes = self.layout_outputs()
@@ -50,7 +49,7 @@ class InitRenderer:
             bits = value.init_bits or (0,) * self.numel(value.shape)
             if len(bits) != self.numel(value.shape):
                 raise SystemExit(f"input tensor {value.name} has mismatched shape and data")
-            if self.tensor_tile_io and (self.tile_input_names is None or value.name in self.tile_input_names):
+            if value.name in self.tile_input_names:
                 bits = tensor_tile_bits(bits,value.shape)
             data.extend(struct.pack(f"<{len(bits)}H", *bits))
         return offsets, bytes(data)
@@ -98,7 +97,6 @@ class InitRenderer:
             'static_assert(nnedge::kArenaAlign == 64, "NNC IO offsets require 64-byte alignment");',
             "",
             f"constexpr nnedge::size_t kWeightBytes = {self.weights.cursor};",
-            f"constexpr bool kTensorTileIO = {'true' if self.tensor_tile_io else 'false'};",
             "",
             *self.render_context(),
             "",
@@ -168,45 +166,26 @@ class InitRenderer:
 
 class ForwardRenderer:
     def __init__(self, program: LoweredProgram, abi: ForwardABI, weights: WeightStore, *,
-                 tensor_tile_io=False, quant_token_capacity=None, matmul_token_capacity=None) -> None:
+                 quant_token_capacity=None, matmul_token_capacity=None) -> None:
+        self.layout = LayoutPlan(program, abi)
+        program = self.layout.program
         self.program = program
         self.abi = abi
         self.weight_names = set(weights.records)
         self.liveness = Liveness(program)
-        self.tensor_tile_io = tensor_tile_io
         self.quant_token_capacity = quant_token_capacity
         self.matmul_token_capacity = matmul_token_capacity
         if quant_token_capacity is not None and quant_token_capacity <= 0:
             raise ValueError("quant token capacity must be positive")
         if matmul_token_capacity is not None and matmul_token_capacity <= 0:
             raise ValueError("matmul token capacity must be positive")
-        if tensor_tile_io:
-            allowed = {"linear_mxfp4", "linear_nvfp4", "linear_q8_0", "linear_fp4",
-                       "linear_fp8_e4m3fn", "linear_fp8_e5m2", "matmul", "matmul_transpose"}
-            if len(program.nodes) != 1 or program.nodes[0].op not in allowed:
-                raise ValueError("tensor-tile IO requires a single quant Linear without bias or BF16 matmul")
-            lhs_name = program.nodes[0].args[0]
-            io = [v for v in abi.inputs if v.kind == "tensor" and v.name == lhs_name] + list(program.nodes[0].outputs)
-            for value in io:
-                if len(value.shape) not in (2,3) or min(value.shape) <= 0 or value.shape[-1]%8:
-                    raise ValueError("tensor-tile IO requires rank-two/headed tensors with channels%8=0")
-            if sum(InitRenderer.align(InitRenderer.numel(v.shape)*2) for v in io) > 96*1024:
-                raise ValueError("tensor-tile IO does not fit SRAM tensor arena; use contiguous/chunked IO")
-        self.dram_names = self.compute_dram_preferences(program)
-        if tensor_tile_io:
-            self.dram_names = set(program.nodes[0].args[1:]) if program.nodes[0].op in ("matmul","matmul_transpose") else set()
+        self.dram_names = self.layout.dram_names
+        self.call_remap = {}
         self.input_remap = {
             value.name: f"{value.name}_dtcm"
             for value in abi.inputs
             if value.kind == "tensor" and value.name not in self.dram_names
-        }
-
-    @staticmethod
-    def compute_dram_preferences(program: LoweredProgram) -> set[str]:
-        return {
-            name
-            for node in program.nodes
-            for name in node.dram_preferred
+            and self.layout.bytes(value.shape) <= 96*1024
         }
 
     def render(self) -> str:
@@ -231,7 +210,7 @@ class ForwardRenderer:
         lines.extend(self.render_input_dma())
         for index, node in enumerate(self.program.nodes):
             lines.extend(self.render_node(index, node))
-        lines.append(f"    nnedge::copy({self.primary_output().name}, {self.program.output});")
+        lines.append(f"    if (!nnedge::copy_tensor_payload({self.primary_output().name}, {self.program.output})) return 1;")
         lines.extend(self.render_profile_report())
         lines.extend([
             "    return 0;",
@@ -255,7 +234,7 @@ class ForwardRenderer:
                 "",
                 f"    Tensor<dtype> {name}({self.shape_literal(value.shape)});",
                 f"    nnedge::malloc_tensor({name});",
-                f"    nnedge::copy({name}, {value.name});",
+                f"    if (!nnedge::copy_tensor_payload({name}, {value.name})) return 1;",
             ])
         return lines
 
@@ -332,12 +311,34 @@ class ForwardRenderer:
             "#if NNEDGE_PROFILE",
             f"    const nnedge::size_t profile_start_{index} = edge_get_cycle();",
             "#endif",
+        ])
+        converted = []
+        for arg_index, name in enumerate(node.args):
+            if name not in self.layout.layouts:
+                continue
+            wanted = self.layout.wanted(node,arg_index)
+            if wanted == self.layout.layouts[name]:
+                continue
+            view = f"layout_{index}_{arg_index}"
+            native_lhs = arg_index == 0 and (node.op in ("matmul","matmul_transpose") or node.outputs[0].name in self.layout.native_quant)
+            allocator = "malloc_tensor" if native_lhs else "malloc_tensor_dram"
+            lines.extend([
+                f"    Tensor<dtype> {view}({self.shape_literal(self.layout.shapes[name])});",
+                f"    nnedge::{allocator}({view});",
+                f"    if (!nnedge::convert_tensor_layout({view}, {self.arg(name)}, {'true' if wanted == TILED else 'false'})) return 1;",
+            ])
+            self.call_remap[arg_index] = view
+            converted.append(view)
+        lines.extend([
             f"    {self.render_call(node)};",
             "#if NNEDGE_PROFILE",
             f"    const nnedge::size_t profile_cycles_{index} =",
             f"        edge_get_cycle() - profile_start_{index};",
             "#endif",
         ])
+        self.call_remap.clear()
+        for view in reversed(converted):
+            lines.append(f"    nnedge::free_tensor({view});")
         for name in self.liveness.frees_after(index, node):
             lines.append(f"    nnedge::free_tensor({name});")
         return lines
@@ -360,15 +361,11 @@ class ForwardRenderer:
         return lines
 
     def render_call(self, node: LoweredNode) -> str:
-        args = ", ".join(self.arg(arg) for arg in node.args)
+        args = ", ".join(self.call_remap.get(i,self.arg(arg)) for i,arg in enumerate(node.args))
         outs = ", ".join(output.name for output in node.outputs)
         quant_template = f"<{self.quant_token_capacity}>" if self.quant_token_capacity is not None else ""
-        if self.tensor_tile_io and node.op not in ("matmul", "matmul_transpose"):
+        if node.outputs[0].name in self.layout.native_quant:
             quant_template = f"<{self.quant_token_capacity if self.quant_token_capacity is not None else 64}, true>"
-        if self.tensor_tile_io and node.op in ("matmul", "matmul_transpose"):
-            args = ", ".join(f"nnedge::TensorTileView({self.arg(arg)})" if i == 0 else self.arg(arg)
-                             for i,arg in enumerate(node.args))
-            outs = ", ".join(f"nnedge::TensorTileView({output.name})" for output in node.outputs)
         match node.op:
             case "rms_norm":
                 return (
@@ -403,7 +400,9 @@ class ForwardRenderer:
             case "mul":
                 return f"nnedge::op::mul({outs}, {args}, ctx->{node.attrs['eye']})"
             case "softmax":
-                return f"nnedge::op::softmax({outs}, {args}, ctx->{node.attrs['eye']})"
+                shape = self.layout.shapes[node.args[0]]
+                heads = shape[0] if len(shape) == 3 else 1
+                return f"nnedge::op::softmax({outs}, {args}, ctx->{node.attrs['eye']}, {heads}u)"
             case "matmul" | "matmul_transpose":
                 template = f"<{self.matmul_token_capacity}>" if self.matmul_token_capacity is not None else ""
                 return (

@@ -48,16 +48,11 @@ def generate(model_file: Path, generated_dir: Path) -> tuple[int, ...]:
     import torch
     from nnc import compiler
     model, example_args = compiler.load_model_example(model_file)
-    compiler.compile(model, example_args, out_dir=generated_dir)
+    compiler.compile(model, example_args, out_dir=generated_dir, save_reference=True)
 
-    with torch.no_grad():
-        result = model(*example_args)
-    if isinstance(result, tuple):
-        if len(result) != 1:
-            raise SystemExit("runner supports exactly one output tensor")
-        result = result[0]
-    bits = result.detach().to(torch.bfloat16).contiguous().view(torch.int16).flatten()
-    return tuple(int(value) & 0xffff for value in bits.tolist())
+    raw = (generated_dir / "expected.bin").read_bytes()
+    return struct.unpack(f"<{len(raw)//2}H", raw)
+
 
 
 def build(args: argparse.Namespace, generated_dir: Path, build_dir: Path) -> None:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "tensor_layout.hpp"
 #include "activation.hpp"
 #include "attention.hpp"
 #include "elementwise.hpp"

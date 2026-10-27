@@ -3,7 +3,7 @@
 
 The stream window matches the tiled circular Matmul benchmark: first weight
 DMA submission through tensor.sync + dma.sync. NNC preplans tensor IO storage;
-ordinary whole-tensor DRAM/SRAM DMA transfers are measured separately.
+ordinary whole-tensor DRAM/SRAM setup transfers lie outside operator timing.
 """
 from __future__ import annotations
 
@@ -20,6 +20,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from nnc import compiler, run_smoke
+
+QUANT_PRESETS = {
+    "nvfp4": ("LinearNvFp4", "NVFP4WeightPack", 1152),
+    "mxfp4": ("LinearMxFp4", "MXFP4WeightPack", 2176),
+    "q8_0": ("LinearQ8_0", "Q8_0WeightPack", 1088),
+    "fp4": ("LinearFp4", "FP4WeightPack", 576),
+    "fp8_e4m3fn": ("LinearFp8E4M3FN", "FP8E4M3FNWeightPack", 1088),
+    "fp8_e5m2": ("LinearFp8E5M2", "FP8E5M2WeightPack", 1088),
+}
 
 
 def revision(path):
@@ -39,8 +48,7 @@ def fixture(spec):
         values *= torch.arange(1,65).reshape(64,1)/32
         values[0,:32] = 0
         linear.weight.copy_(values)
-    cls = {"mxfp4": nnc.LinearMxFp4, "nvfp4": nnc.LinearNvFp4,
-           "q8_0": nnc.LinearQ8_0}[spec]
+    cls = getattr(nnc, QUANT_PRESETS[spec][0])
     x = ((torch.arange(128*64).reshape(128,64)%13-6).float()/32).to(torch.bfloat16)
     return cls(linear).eval(), (x,)
 
@@ -51,7 +59,7 @@ def main():
     parser.add_argument("--sim-exe", type=Path, required=True)
     parser.add_argument("--edge32-include", type=Path, required=True)
     parser.add_argument("--e3-include", type=Path, required=True)
-    parser.add_argument("--spec", action="append", choices=("nvfp4", "mxfp4", "q8_0"))
+    parser.add_argument("--spec", action="append", choices=tuple(QUANT_PRESETS))
     parser.add_argument("--capacity", action="append", type=int, choices=(32,64,128))
     args = parser.parse_args()
     out = args.out_dir.resolve()
@@ -60,14 +68,16 @@ def main():
     provenance = {"nnc": revision(ROOT),
                   "edge32": revision(args.edge32_include.resolve().parent),
                   "e3": revision(args.e3_include.resolve().parent),
+                  "asic": revision(args.e3_include.resolve().parent.parent / "edge-asic"),
                   "sim_exe": str(sim), "sim_sha256": hashlib.sha256(sim.read_bytes()).hexdigest(),
                   "python": sys.version, "command": sys.argv,
                   "simulator_workspace": revision(sim.parent),
                   "compile_flags": "riscv32-unknown-elf rv32im_zba ilp32 medany C++17 -O2 freestanding",
                   "source_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                                     for p in [*sorted((ROOT/"cpp/libnn").glob("*.hpp")),
+                                              *sorted((ROOT/"nnc").glob("*.py")),
                                               Path(__file__).resolve(), ROOT/"nnc/run_smoke.py",
-                                              ROOT/"nnc/compiler.py", ROOT/"nnc/codegen.py",
+                                              ROOT/"nnc/compiler.py", ROOT/"nnc/codegen.py", ROOT/"nnc/layout.py",
                                               ROOT/"nnc/test/quant_benchmark_main.cpp",
                                               ROOT/"nnc/test/quant_capacity_main.cpp",
                                               ROOT/"nnc/test/quant_forward_main.cpp"]},
@@ -82,7 +92,7 @@ def main():
         model, inputs = fixture(spec)
         generated = out / spec / "generated"
         compiler.compile(model, inputs, out_dir=generated, save_reference=True,
-                         tensor_tile_io=True,quant_token_capacity=128)
+                         quant_token_capacity=128)
         provenance.setdefault("artifacts",{})[spec] = {
             name: hashlib.sha256((generated/name).read_bytes()).hexdigest()
             for name in ("input.bin","weight.bin","expected.bin","io_layout.json")}
@@ -102,7 +112,7 @@ def main():
             # The selected entry point is the real linear_quant.hpp API.
             (case_generated / "bench_config.hpp").write_text(
                 '#pragma once\n#include "init.hpp"\n'
-                f'using BenchmarkPack = nnedge::{dict(mxfp4="MXFP4WeightPack", nvfp4="NVFP4WeightPack", q8_0="Q8_0WeightPack")[spec]};\n'
+                f'using BenchmarkPack = nnedge::{QUANT_PRESETS[spec][1]};\n'
                 'inline bool benchmark_linear(nnedge::Tensor<nnedge::bfloat16_t> y, nnedge::Tensor<nnedge::bfloat16_t> x) {\n'
                 f'    return nnedge::op::linear_{spec}<{capacity}, true>(y, x, '
                 f'model::mio::ctx.{packed}{global_arg});\n}}\n')
@@ -129,16 +139,10 @@ def main():
             compute_starts = 64*128//capacity
             if mac["macs"] != 128*64*64 or mac["issue"] != 8192 or mac["starts"] != compute_starts+copy_starts:
                 raise RuntimeError(f"{spec}/{capacity}: incorrect work accounting {mac}")
-            transfer, = re.findall(r"^NNC_QUANT_TRANSFER (.+)$",console,re.M)
-            transfers = {k: int(v) for k,v in re.findall(r"(\w+)=(\d+)",transfer)}
-            total_cycles = counts["op_cycles"]+sum(transfers.values())
             records.append(dict(spec=spec, requested_capacity=capacity, ideal_cycles=8192,
                                 compute_starts=compute_starts, copy_starts=copy_starts,
                                 stream_util_percent=819200/counts["stream_cycles"],
                                 op_util_percent=819200/counts["op_cycles"],
-                                transfer_inclusive_cycles=total_cycles,
-                                transfer_inclusive_util_percent=819200/total_cycles,
-                                **transfers,
                                 **counts, **{f"mac_{k}": v for k,v in mac.items()}))
             (out / "results.json").write_text(json.dumps(records, indent=2)+"\n")
             if capacity == 128:
@@ -150,8 +154,8 @@ def main():
                 run_smoke.run(build_args, regression, expected)
                 log = (regression / "software-console.log").read_text()
                 capacities = [int(v) for v in re.findall(r"NNC_QUANT_PROFILE capacity=(\d+)", log)]
-                # Physical ring bytes: eight dense FP4 slots, four Q8 slots.
-                ring_bytes = {"mxfp4": 2176, "nvfp4": 1152, "q8_0": 1088}[spec]
+                # Physical ring bytes depend on each packed transport format.
+                ring_bytes = QUANT_PRESETS[spec][2]
                 want = [128,(4096-ring_bytes)//32]
                 if capacities != want:
                     raise RuntimeError(f"{spec}: capacity fallback {capacities} != {want}")
@@ -176,15 +180,13 @@ def main():
              "Ideal cycles = 128×64×64 / 64 MACs per cycle = 8192.", "",
              "Working SRAM uses tensor order; kernel time contains no SRAM-to-SRAM COPY.",
              "Stream time includes weight DMA and both final syncs; operator time also includes setup.",
-             "NNC plans IO storage at compile time. Boundary load/store use ordinary whole-tensor DMA.",
-             "The transfer-inclusive total adds ordinary DRAM load/store; printf and allocation are excluded.", "",
-             "| Quant | Max tokens | Chunks | Stream cycles | Stream MAC utilization | Operator cycles | Operator MAC utilization | With boundary DMA | With DMA utilization |",
-             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+             "BF16 input/output reside in SRAM; packed weights reside in DRAM.", "",
+             "| Quant | Max tokens | Chunks | Stream cycles | Stream MAC utilization | Operator cycles | Operator MAC utilization |",
+             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for r in records:
         lines.append(f'| {r["spec"]} | {r["requested_capacity"]} | {r["chunks"]} | '
                      f'{r["stream_cycles"]} | {r["stream_util_percent"]:.2f}% | '
-                     f'{r["op_cycles"]} | {r["op_util_percent"]:.2f}% | '
-                     f'{r["transfer_inclusive_cycles"]} | {r["transfer_inclusive_util_percent"]:.2f}% |')
+                     f'{r["op_cycles"]} | {r["op_util_percent"]:.2f}% |')
     (out / "results.md").write_text("\n".join(lines)+"\n")
     print("\n".join(lines))
 

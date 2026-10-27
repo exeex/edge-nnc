@@ -332,7 +332,7 @@ class MatmulLowerer(OpLowerer):
             node.args,
             node.attrs,
             dram_preferred=(
-                node.args[:2] + node.outputs
+                (node.args[1],)
             ),
         )
 
