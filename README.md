@@ -3,14 +3,18 @@
 PyTorch graph lowering, generated C++ ABI, RV32 runtime, model fixtures and
 correctness runners. Compiler and runtime are one versioned unit.
 
-The consuming workspace supplies `edge32_intrinsic.hpp` and a Verilator
-simulator. This package contains no RTL or encrypted simulator dependency.
+The consuming workspace supplies the E3 SDK (`include/edge_e3/`), the
+matching `edge32_intrinsic.hpp` backend and a Verilator simulator. This package contains no RTL or encrypted simulator dependency.
 See `UPSTREAM.md` for the imported source revision and integration changes.
 
 Install with Python 3.12 and `uv sync --extra cpu`. Compiler tests:
 `uv run --extra cpu python -m unittest nnc.test_compiler`.
 
-Build a model with `nnc/run_smoke.py --build-only --edge32-include PATH`.
+Build a model with `nnc/run_smoke.py --build-only --edge32-include PATH --e3-include PATH`.
+The first path is Edge-32 `include/`; the second is E3 `include/`. The
+`EDGE32_INCLUDE` and `EDGE_E3_INCLUDE` environment variables also select them.
+`cpp/intrinsic/` contains forwarding headers only; E3 owns the implementation.
+The shared RV32 runner support remains under `cpp/baremetal/`.
 For RTL correctness, also provide `--sim-exe PATH` and omit `--build-only`.
 Use `--model-file nnc/test/smoke_linear.py` for the minimal linear fixture.
 The simulator must accept `+mem128`, `+mem128_words`, `+max_cycles`,

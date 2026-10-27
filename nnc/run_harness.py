@@ -19,13 +19,14 @@ DEFAULT_OUT = REPO_ROOT / "example/llama/build/harness"
 
 
 def run_case(model: Path, out_dir: Path, sim_exe: Path, *, profile: bool,
-             max_cycles: int, edge32_include: Path) -> dict[str, object]:
+             max_cycles: int, edge32_include: Path, e3_include: Path) -> dict[str, object]:
     build_dir = REPO_ROOT / "example/llama/build" / model.stem
     command = [
         sys.executable, str(REPO_ROOT / "nnc/run_smoke.py"),
         "--model-file", str(model), "--build-dir", str(build_dir),
         "--sim-exe", str(sim_exe), "--skip-verilator-build",
         "--max-cycles", str(max_cycles), "--edge32-include", str(edge32_include),
+        "--e3-include", str(e3_include),
     ]
     if profile:
         command.append("--profile")
@@ -76,6 +77,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sim-exe", type=Path, required=True)
     parser.add_argument("--edge32-include", type=Path, required=True)
+    parser.add_argument("--e3-include", type=Path,
+                        default=Path(os.environ.get("EDGE_E3_INCLUDE", str(REPO_ROOT.parent.parent / "src/edge-e3/include"))))
     parser.add_argument("--sim-build-script", type=Path)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--max-cycles", type=int, default=5_000_000)
@@ -100,7 +103,8 @@ def main() -> None:
         profile = model.name == "llama3_source.py"
         print(f"[{index}/{len(models)}] {model.name}", flush=True)
         record = run_case(model, args.out_dir, sim_exe, profile=profile,
-                          max_cycles=args.max_cycles, edge32_include=args.edge32_include.resolve())
+                          max_cycles=args.max_cycles, edge32_include=args.edge32_include.resolve(),
+                          e3_include=args.e3_include.resolve())
         records.append(record)
         print(f"  {record['status']} cycles={record['cycles']} max_abs={record['max_abs']}",
               flush=True)

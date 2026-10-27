@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tensor.hpp"
-#include "edge_sim_console.hpp"
+#include "edge_intrinsic.hpp"
 
 namespace nnedge::op {
 

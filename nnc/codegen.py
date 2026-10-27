@@ -181,7 +181,7 @@ class ForwardRenderer:
             "#endif",
             "",
             "#if NNEDGE_PROFILE",
-            '#include "edge_sim_console.hpp"',
+            '#include "edge_intrinsic.hpp"',
             "#endif",
             "",
             "namespace model {",

@@ -87,7 +87,7 @@ def build(args: argparse.Namespace, generated_dir: Path, build_dir: Path) -> Non
         "-fno-exceptions", "-fno-rtti", "-fno-pic", "-fno-pie", "-O2",
         "-Wall", "-Wextra", *profile,
         f"-I{REPO_ROOT / 'cpp'}", f"-I{REPO_ROOT / 'cpp/intrinsic'}",
-        f"-I{args.edge32_include}",
+        f"-I{args.edge32_include}", f"-I{args.e3_include}",
         f"-I{generated_dir}",
         "-c", str(args.main_file), "-o", str(build_dir / "main.o"),
     ], check=True)
@@ -243,11 +243,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sim-build-script", type=Path)
     parser.add_argument("--edge32-include", type=Path,
                         default=Path(os.environ.get("EDGE32_INCLUDE", str(REPO_ROOT.parent.parent / "src/edge-32/include"))))
+    parser.add_argument("--e3-include", type=Path,
+                        default=Path(os.environ.get("EDGE_E3_INCLUDE", str(REPO_ROOT.parent.parent / "src/edge-e3/include"))),
+                        help="E3 product SDK include directory (contains edge_e3/)")
     parser.add_argument("--skip-verilator-build", action="store_true",
                         help="reuse an already-built simulator (used by the suite harness)")
     args = parser.parse_args()
     if not (args.edge32_include / "edge32_intrinsic.hpp").is_file():
         parser.error("supply --edge32-include pointing to the matching edge-32/include")
+    if not (args.e3_include / "edge_e3/edge_intrinsic.hpp").is_file():
+        parser.error("supply --e3-include pointing to the matching edge-e3/include")
     if not args.build_only and not args.sim_exe:
         parser.error("--sim-exe is required unless --build-only")
     if args.output_base % 64:

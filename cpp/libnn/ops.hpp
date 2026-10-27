@@ -10,4 +10,5 @@
 #include "rope.hpp"
 #include "softmax.hpp"
 
+#include "linear_weight_slots.hpp"
 #include "linear_fp4.hpp"

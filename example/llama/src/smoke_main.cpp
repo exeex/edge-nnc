@@ -1,5 +1,5 @@
 #include "forward.hpp"
-#include "intrinsic/edge_sim_console.hpp"
+#include "intrinsic/edge_intrinsic.hpp"
 
 extern "C" void *memcpy(void *dst, const void *src, unsigned long size)
 {
