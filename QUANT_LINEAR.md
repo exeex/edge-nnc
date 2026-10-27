@@ -5,11 +5,13 @@ Each spec has a readable PyTorch source model and a seven-line C++ main:
 | Model directory | Python custom op / C++ entry | Weight encoding | Pack bytes |
 | --- | --- | --- | ---: |
 | `example/linear_fp4` | `linear_fp4` | E2M1 | 144 |
+| `example/linear_mxfp4` | `linear_mxfp4` | E2M1 / E8M0 scales, K32 | 272 (two groups) |
+| `example/linear_nvfp4` | `linear_nvfp4` | E2M1 / E4M3FN scales, K16 | 144 (two groups) |
 | `example/linear_q8_0` | `linear_q8_0` | signed INT8 | 272 |
 | `example/linear_fp8_e4m3fn` | `linear_fp8_e4m3fn` | E4M3FN | 272 |
 | `example/linear_fp8_e5m2` | `linear_fp8_e5m2` | E5M2 | 272 |
 
-All four use BF16 input/output, K32 groups, and eight 16-bit scales per pack.
+The four original presets use BF16 input/output, K32 groups, and eight 16-bit scales per pack.
 Q8_0 uses native FP16 scales (`stype=3`); FP4 and both FP8 presets use BF16
 scales (`stype=0`).
 Weights and scales are static parameters. Public inputs and outputs remain
@@ -17,10 +19,18 @@ contiguous `[M,K]` and `[M,N]`; N must be a positive multiple of 8 and K a
 positive multiple of 32. Each model uses M=9, N=16, K=64 to exercise token
 batching, multiple output blocks and changing K groups.
 
+The native MXFP4 and NVFP4 examples also use M=9, N=16, K=64, with
+`bias=False` so their public saved-artifact runners can compare at zero
+tolerance. They wrap `LinearMxFp4` and `LinearNvFp4`, use byte scales and
+pair adjacent groups into DMA slots. NVFP4 has a BF16-rounded per-tensor
+global scale. See [MICROSCALE_LINEAR.md](MICROSCALE_LINEAR.md) for the native
+layout and numerical contract.
+
 ## Source to C++
 
 Use `LinearFp4`, `LinearQ8_0`, `LinearFp8E4M3FN`, or `LinearFp8E5M2` from
-`nnc` to wrap an existing `torch.nn.Linear`:
+`nnc` to wrap an existing `torch.nn.Linear`. `LinearMxFp4` and `LinearNvFp4`
+provide the native byte-scale variants:
 
 ```python
 import torch
@@ -95,7 +105,7 @@ python -m nnc.compiler --model-file example/linear_q8_0/model.py --out-dir build
 ```
 
 Outputs are `forward.hpp`, `init.hpp`, `weight.bin`, and `input.bin`.
-The four named example models explicitly compile to their own directory with
+The six named example models explicitly compile to their own directory with
 `save_reference=True`, so their Git-tracked artifact set also has `expected.bin`.
 The workspace example runners pass `--artifacts-dir` and rebuild/replay this
 saved set without importing PyTorch or evaluating the model. Model invocation
@@ -108,7 +118,8 @@ need libc shims. An existing consumer's strong definition remains supported.
 
 ## Slot layout
 
-Packs are ordered `[N/8,K/32]`. Each has eight little-endian native scales,
+For the four original 16-bit-scale presets, packs are ordered `[N/8,K/32]`.
+Each has eight little-endian native scales,
 followed immediately by four output-major 8x8 weight tiles. FP4 packs two
 values per byte (earlier value in the low nibble); INT8 and FP8 use one byte
 per value. These layouts require no tail padding at the default K32 group size.

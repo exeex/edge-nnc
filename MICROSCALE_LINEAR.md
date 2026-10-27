@@ -15,6 +15,28 @@ Neither new preset has a weight zero point or shift. Public operands are
 contiguous `[M,K]` / `[M,N]`; N must be divisible by 8 and K by the indicated
 group size. M is positive; token chunks and tails reuse the existing runtime.
 
+## Runnable Linear examples
+
+The public [MXFP4 model](example/linear_mxfp4/model.py) and
+[NVFP4 model](example/linear_nvfp4/model.py) each wrap an ordinary
+`torch.nn.Linear(64, 16, bias=False)` and consume BF16 input `[9,64]`.
+Both have a minimal C++ main and are linked into the NNC smoke discovery as
+`smoke_linear_mxfp4_example.py` and `smoke_linear_nvfp4_example.py`.
+
+The edge-cores workspace exposes the corresponding `example/linear_mxfp4`
+and `example/linear_nvfp4` directories, including saved headers, packed binary
+payloads, goldens and runners:
+
+```sh
+./example/linear_mxfp4/run.sh
+./example/linear_nvfp4/run.sh
+```
+
+These runners compare all 144 BF16 outputs at zero tolerance without importing
+PyTorch. From that workspace, explicitly regenerate the saved artifacts with
+`python -m example.linear_mxfp4.model` or
+`python -m example.linear_nvfp4.model` using a PyTorch environment.
+
 ## Source codes and quantization
 
 `nnc.microscale.quantize(weight,spec)` returns exact E2M1 values in a BF16
@@ -140,3 +162,6 @@ single-token DTCM operands, repeated circular wrap, odd K-group tails and
 physical pairs crossing output-channel blocks, an observable BF20 low-fraction
 case and NVFP4/MXFP4/NVFP4 global reprogramming. The consumer registers them
 under CTest's `microscale` label with exact output comparison.
+The two public wrapper examples above are additional smoke entries and
+exercise fresh compiler generation as well as saved-artifact replay in the
+consuming workspace.
