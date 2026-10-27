@@ -78,7 +78,7 @@ not implemented by this single-op mode. Default contiguous export is unchanged.
 
 ```sh
 python nnc/benchmark_matmul.py \
-  --out-dir build/matmul-ring8 \
+  --out-dir build/matmul-dma-owned \
   --sim-exe /path/to/Vedge32_tensor_integration_tb \
   --edge32-include /path/to/edge-32/include \
   --e3-include /path/to/edge-e3/include
@@ -102,18 +102,23 @@ RV32IM/Zba `-O2`, wide H4, ring8, 64×64 RHS × 128 tokens:
 
 | Planned working-SRAM IO | Stream cycles | Stream MAC utilization | Complete SRAM kernel cycles | Kernel MAC utilization |
 | --- | ---: | ---: | ---: | ---: |
-| Matmul | 8,787 | 93.23% | 10,977 | 74.63% |
-| Matmul-transpose | 8,829 | 92.79% | 10,987 | 74.56% |
+| Matmul | 8,787 | 93.23% | 9,653 | 84.86% |
+| Matmul-transpose | 8,839 | 92.68% | 9,677 | 84.65% |
 
 Ideal cycles are 128×64×64/64 = 8192. Stream timing starts before RHS circular
 DMA submission and ends after both Tensor/DMA syncs. Kernel time includes
-validation, capacity/setup and cache maintenance. Planned IO's ordinary
+validation and capacity/setup. ASIC/DMA operators perform no D-cache
+maintenance under the [tensor ownership contract](MEMORY_OWNERSHIP.md). Planned IO's ordinary
 boundary DMA is outside these measurements; contiguous operator measurements
 include their DMA staging/restoration and are labeled separately in the report.
 Profiling is opt-in with `NNEDGE_MATMUL_PROFILE=1`; printing follows timing.
 
 Source/compiler/simulator hashes, raw command traces, JSON/CSV/Markdown
 results and generated artifacts are in the consuming workspace's
-`build/matmul-ring8/` and `build/matmul-ring8-head-tail/`. A forced-inline
+`build/matmul-dma-owned/` and `build/matmul-dma-owned-head-tail/`. A forced-inline
 parameter helper avoids scalar function-call overhead between tile starts;
 it performs no software payload slicing.
+
+Removing redundant operator cache maintenance reduced planned SRAM kernel
+cycles from 10,977 to 9,653 (Matmul) and 10,987 to 9,677 (transpose).
+The weight stream, DMA tile slicing, and hardware are unchanged.

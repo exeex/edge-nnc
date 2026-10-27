@@ -38,6 +38,7 @@ extern "C" int main()
     for (size_t i=0; i<numel(reserved); i+=64)
         if (reserved.data[i] != 0xa5) return 15;
     // Both capacity-limited executions must produce the same public bytes.
+    scalar_tensor_acquire(model::mio::y);
     for (size_t i=0; i<numel(y); ++i)
         if (y.data[i].bits != model::mio::y.data[i].bits) return 16;
     if (!op::store_tensor_sram(TensorTileView(model::mio::y),sy)) return 23;

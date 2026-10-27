@@ -152,11 +152,6 @@ class InitRenderer:
             address = f"output_begin + {offset}"
         lines = [f"    mio::{value.name} = Tensor<dtype>({self.shape_literal(value.shape)}, "
                  f"reinterpret_cast<dtype *>({address}));"]
-        if value.name in self.input_offsets:
-            lines.append(
-                f"    edge_dcache_clean_range(mio::{value.name}.data, "
-                f"nnedge::numel(mio::{value.name}) * sizeof(dtype));"
-            )
         return lines
 
     @staticmethod

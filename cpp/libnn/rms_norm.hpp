@@ -110,7 +110,6 @@ __attribute__((always_inline)) inline void rms_norm_apply_weight_batch(
     edge_tensor_wld(eye_stage);
     if (!is_dtcm_addr(weight.data)) {
         constexpr size_t kWeightRingVectors = 8u;
-        edge_dcache_clean_range(weight.data, cols * sizeof(DType));
         edge_dma_start_strided_circular(
             weight.data, weight_ring, kRmsNormVectorElements * sizeof(DType),
             kRmsNormVectorElements * sizeof(DType), blocks,
@@ -188,7 +187,6 @@ __attribute__((always_inline)) inline void rms_norm_impl(
     edge_dma_start(eye.data, eye_stage, tile_bytes);
     edge_dma_sync();
     if (weight_dram) {
-        edge_dcache_clean_range(weight.data, cols * sizeof(DType));
         edge_dma_start(weight.data, weight_stage, cols * sizeof(DType));
         edge_dma_sync();
     }
@@ -262,7 +260,6 @@ __attribute__((always_inline)) inline void rms_norm_impl(
             DType *output_dst = &y.data[batch_base * cols];
             edge_dma_start(output_stage, output_dst, batch_bytes);
             edge_dma_sync();
-            edge_dcache_invalidate_range(output_dst, batch_bytes);
         }
     }
 }

@@ -175,6 +175,23 @@ inline void free_tensor(Tensor<DType> &tensor)
 }
 
 template <typename DType>
+inline void scalar_tensor_acquire(Tensor<DType> tensor)
+{
+    // Only scalar payload consumers touch D-cache. ASIC/DMA producers have
+    // completed their sync; discard any old CPU view before scalar access.
+    if (tensor.data && !is_dtcm_addr(tensor.data))
+        edge_dcache_invalidate_range(tensor.data,numel(tensor)*sizeof(DType));
+}
+
+template <typename DType>
+inline void scalar_tensor_publish(Tensor<DType> tensor)
+{
+    // A scalar producer owns publication before returning to NNC/DMA.
+    if (tensor.data && !is_dtcm_addr(tensor.data))
+        edge_dcache_clean_range(tensor.data,numel(tensor)*sizeof(DType));
+}
+
+template <typename DType>
 inline void copy(Tensor<DType> dst, Tensor<DType> src)
 {
     const size_t n = numel(dst);
@@ -215,30 +232,30 @@ inline void copy(Tensor<DType> dst, Tensor<DType> src)
         return;
     }
     if (!is_dtcm_addr(src.data) && !is_dtcm_addr(dst.data)) {
-        edge_dcache_invalidate_range(src.data, bytes);
+        // DRAM-to-DRAM copy is the scalar fallback, not an ASIC DMA path.
+        scalar_tensor_acquire(src);
+        scalar_tensor_acquire(dst);
         for (size_t i = 0; i < n; ++i) {
             dst.data[i] = src.data[i];
         }
-        edge_dcache_clean_range(dst.data, bytes);
+        scalar_tensor_publish(dst);
         return;
     }
-    if (!src_dtcm) {
-        edge_dcache_clean_range(src.data, bytes);
-    }
+    // Payload ownership is already transferred by its producer. Metadata
+    // remains cacheable; tensor bytes move only through DMA/ASIC engines.
     edge_dma_start(src.data, dst.data, bytes);
     edge_dma_sync();
-    if (!dst_dtcm) {
-        edge_dcache_invalidate_range(dst.data, bytes);
-    }
 }
 
 template <typename DType>
 inline void zero(Tensor<DType> tensor)
 {
     const size_t n = numel(tensor);
+    scalar_tensor_acquire(tensor);
     for (size_t i = 0; i < n; ++i) {
         tensor.data[i] = DType();
     }
+    scalar_tensor_publish(tensor);
 }
 
 } // namespace nnedge

@@ -26,7 +26,6 @@ inline void add_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
     DType *w_stage = out_stage + 32u * 8u;
 
     configure_bf16_tensor();
-    edge_dcache_clean_range(eye.data, 8u * 8u * sizeof(DType));
     edge_dma_start(eye.data, w_stage, 8u * 8u * sizeof(DType));
     edge_dma_sync();
     edge_tensor_wld(w_stage);
@@ -41,13 +40,11 @@ inline void add_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
         DType *out_ptr = &y.data[offset];
 
         if constexpr (LhsDram) {
-            edge_dcache_clean_range(lhs_ptr, count * sizeof(DType));
             edge_dma_start(lhs_ptr, lhs_stage, count * sizeof(DType));
             edge_dma_sync();
             lhs_ptr = lhs_stage;
         }
         if constexpr (RhsDram) {
-            edge_dcache_clean_range(rhs_ptr, count * sizeof(DType));
             edge_dma_start(rhs_ptr, rhs_stage, count * sizeof(DType));
             edge_dma_sync();
             rhs_ptr = rhs_stage;
@@ -67,10 +64,8 @@ inline void add_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
 
         if constexpr (OutputDram) {
             DType *output_dst = &y.data[offset];
-            edge_dcache_clean_range(output_dst, count * sizeof(DType));
             edge_dma_start(out_stage, output_dst, count * sizeof(DType));
             edge_dma_sync();
-            edge_dcache_invalidate_range(output_dst, count * sizeof(DType));
         }
         offset += count;
     }
@@ -131,9 +126,13 @@ template <typename DType>
 inline void mul_scalar(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs)
 {
     const size_t n = numel(y);
+    scalar_tensor_acquire(lhs);
+    scalar_tensor_acquire(rhs);
+    scalar_tensor_acquire(y);
     for (size_t i = 0; i < n; ++i) {
         y.data[i] = DType::from_float(lhs.data[i].to_float() * rhs.data[i].to_float());
     }
+    scalar_tensor_publish(y);
 }
 
 template <bool LhsDram, bool RhsDram, bool OutputDram, typename DType>
@@ -152,7 +151,6 @@ inline void mul_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
     DType *w_stage = out_stage + kBatchElements;
 
     configure_bf16_tensor();
-    edge_dcache_clean_range(eye.data, 8u * 8u * sizeof(DType));
     edge_dma_start(eye.data, w_stage, 8u * 8u * sizeof(DType));
     edge_dma_sync();
     edge_tensor_wld(w_stage);
@@ -168,7 +166,6 @@ inline void mul_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
 
         DType *lhs_ptr = &lhs.data[batch_base];
         if constexpr (LhsDram) {
-            edge_dcache_clean_range(lhs_ptr, batch_bytes);
             edge_dma_start(lhs_ptr, lhs_stage, batch_bytes);
             edge_dma_sync();
             lhs_ptr = lhs_stage;
@@ -187,7 +184,6 @@ inline void mul_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
         }
         if constexpr (RhsDram) {
             constexpr size_t kScaleRingVectors = 8u;
-            edge_dcache_clean_range(rhs_ptr, batch_bytes);
             edge_dma_start_strided_circular(
                 rhs_ptr, rhs_stage, 8u * sizeof(DType),
                 8u * sizeof(DType), vector_count, 0u, 1u,
@@ -207,10 +203,8 @@ inline void mul_impl(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
         if constexpr (OutputDram) {
             edge_tensor_sync();
             DType *output_dst = &y.data[batch_base];
-            edge_dcache_clean_range(output_dst, batch_bytes);
             edge_dma_start(out_stage, output_dst, batch_bytes);
             edge_dma_sync();
-            edge_dcache_invalidate_range(output_dst, batch_bytes);
         } else {
             // The next batch reprograms the direct stream and weight token.
             edge_tensor_sync();

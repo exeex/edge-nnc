@@ -5,8 +5,9 @@ extern "C" int main()
 {
     model::init();
     if (model::forward()) return 1;
+    nnedge::scalar_tensor_acquire(model::mio::rhs);
     model::mio::rhs.data[0].bits ^= 0x8000u;
-    edge_dcache_clean_range(model::mio::rhs.data,2);
+    nnedge::scalar_tensor_publish(model::mio::rhs);
     nnedge::reset_allocator();
     return model::forward();
 }

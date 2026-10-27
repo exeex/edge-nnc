@@ -34,16 +34,6 @@ inline void rope(Tensor<DType> xq_out, Tensor<DType> xk_out,
 
     configure_bf16_tensor();
     edge_tensor_setn(1);
-    if (q_input_dram) {
-        edge_dcache_clean_range(xq.data, numel(xq) * sizeof(DType));
-    }
-    if (k_input_dram) {
-        edge_dcache_clean_range(xk.data, numel(xk) * sizeof(DType));
-    }
-    if (table_dram) {
-        edge_dcache_clean_range(rope_table.data,
-                                numel(rope_table) * sizeof(DType));
-    }
 
     // The full Llama path keeps Q, K, and both outputs in DTCM.  Stream the
     // complete contiguous token/block sequence through a small circular ring:
@@ -119,10 +109,8 @@ inline void rope(Tensor<DType> xq_out, Tensor<DType> xk_out,
             edge_tensor_sync();
             if (q_output_dram) {
                 DType *q_dst = &xq_out.data[data_base];
-                edge_dcache_clean_range(q_dst, vector_bytes);
                 edge_dma_start(out_stage, q_dst, vector_bytes);
                 edge_dma_sync();
-                edge_dcache_invalidate_range(q_dst, vector_bytes);
             }
 
             edge_tensor_wld<EDGE_TENSOR_LOAD_OPT_REUSE>();
@@ -139,10 +127,8 @@ inline void rope(Tensor<DType> xq_out, Tensor<DType> xk_out,
             edge_tensor_sync();
             if (k_output_dram) {
                 DType *k_dst = &xk_out.data[data_base];
-                edge_dcache_clean_range(k_dst, vector_bytes);
                 edge_dma_start(out_stage, k_dst, vector_bytes);
                 edge_dma_sync();
-                edge_dcache_invalidate_range(k_dst, vector_bytes);
             }
         }
     }

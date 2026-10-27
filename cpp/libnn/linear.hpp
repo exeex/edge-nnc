@@ -59,10 +59,6 @@ inline void linear_impl(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
         (kDtcmOpScratchBytes - stage_bytes) / kWeightTileBytes;
 
     const bool weight_dram = !is_dtcm_addr(weight.data);
-    if (weight_dram) {
-        edge_dcache_clean_range(weight.data,
-                                out_cols * in_cols * sizeof(bfloat16_t));
-    }
     configure_bf16_tensor();
 
     for (size_t token_base = 0; token_base < rows; token_base += kTokenTile) {
@@ -87,7 +83,6 @@ inline void linear_impl(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                     for (size_t token = 0; token < token_count; ++token) {
                         bfloat16_t *input_src =
                             &x.data[(token_base + token) * in_cols + k_blk * 8u];
-                        edge_dcache_clean_range(input_src, 8u * sizeof(bfloat16_t));
                         edge_dma_start(input_src, &x_stage[token * 8u],
                                        8u * sizeof(bfloat16_t));
                         edge_dma_sync();
@@ -138,12 +133,9 @@ inline void linear_impl(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                 for (size_t token = 0; token < token_count; ++token) {
                     bfloat16_t *output_dst =
                         &y.data[(token_base + token) * out_cols + out_blk * 8u];
-                    edge_dcache_clean_range(output_dst, 8u * sizeof(bfloat16_t));
                     edge_dma_start(&y_stage[token * 8u], output_dst,
                                    8u * sizeof(bfloat16_t));
                     edge_dma_sync();
-                    edge_dcache_invalidate_range(output_dst,
-                                                 8u * sizeof(bfloat16_t));
                 }
             }
         }

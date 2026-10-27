@@ -53,6 +53,10 @@ and a 32 KiB staging limit. Unsupported shapes are rejected during lowering.
 These contracts do not cover general PyTorch broadcasting or arbitrary K/N tails.
 
 
+Tensor payload/cache ownership is described in [MEMORY_OWNERSHIP.md](MEMORY_OWNERSHIP.md).
+ASIC/DMA operators do not maintain D-cache; scalar payload access owns its
+acquire/publication boundary.
+
 ## Reusable transformer modules
 
 `from nnc import Linear, RMSNorm, RoPE, KVCacheUpdate, Attention` provides

@@ -38,7 +38,6 @@ inline void actu_unary(Tensor<DType> y, Tensor<DType> x)
         const size_t bytes = count * sizeof(DType);
 
         if (!input_dtcm) {
-            edge_dcache_clean_range(x.data + offset, bytes);
             edge_dma_start(x.data + offset, actu_in, bytes);
             edge_dma_sync();
         }
@@ -50,10 +49,8 @@ inline void actu_unary(Tensor<DType> y, Tensor<DType> x)
         edge_actu_sync();
 
         if (!output_dtcm) {
-            edge_dcache_clean_range(y.data + offset, bytes);
             edge_dma_start(actu_out, y.data + offset, bytes);
             edge_dma_sync();
-            edge_dcache_invalidate_range(y.data + offset, bytes);
         }
         offset += count;
     }

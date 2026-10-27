@@ -131,9 +131,6 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
     auto *psum = reinterpret_cast<unsigned char *>(output)+(TensorSram ? 0 : align_bytes(capacity*n*output_bytes));
     auto *ring = psum+weight_psum_bytes(capacity);
     const bool input_dtcm = is_dtcm_addr(x.data), output_dtcm = is_dtcm_addr(y.data);
-    if (!input_dtcm) edge_dcache_clean_range(x.data, rows*k*2);
-    if (!output_dtcm) edge_dcache_clean_range(y.data, rows*n*2);
-    edge_dcache_clean_range(slots.data, stored_bytes);
 
     for (size_t base=0; base<rows; base+=capacity) {
         const size_t batch = rows-base < capacity ? rows-base : capacity;
@@ -245,7 +242,6 @@ inline bool linear_weight_slots_bytes(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x
             }
         }
     }
-    if (!output_dtcm) edge_dcache_invalidate_range(y.data, rows*n*2);
 #if NNEDGE_QUANT_PROFILE
     const size_t op_cycles = edge_get_cycle() - op_start;
     printf("NNC_QUANT_PROFILE capacity=%lu chunks=%lu stream_cycles=%lu op_cycles=%lu scratch_bytes=%lu\n",

@@ -78,11 +78,6 @@ inline bool matmul_dispatch(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
     auto *psum = reinterpret_cast<float *>(reinterpret_cast<unsigned char *>(output)+
                                          (NativeIO ? 0 : align_bytes(capacity*n*2)));
     auto *ring = reinterpret_cast<unsigned char *>(psum)+align_bytes(((capacity+3u)&~3u)*n*4);
-    edge_dcache_clean_range(rhs.data,numel(rhs)*2);
-    if constexpr (!NativeIO) {
-        edge_dcache_clean_range(lhs.data,numel(lhs)*2);
-        edge_dcache_clean_range(y.data,numel(y)*2);
-    }
     edge_tensor_setwtype<EDGE_TENSOR_WTYPE_BF16>();
     size_t input_cycles = 0, stream_cycles = 0, output_cycles = 0, chunks = 0;
     const size_t kb_count = k/8, ob_count = n/8;
@@ -152,7 +147,6 @@ inline bool matmul_dispatch(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
             if constexpr (!NativeIO) output_cycles += mm_read_cycle()-output_begin;
         }
     }
-    if constexpr (!NativeIO) edge_dcache_invalidate_range(y.data,numel(y)*2);
 #if NNEDGE_MATMUL_PROFILE || defined(NNEDGE_PHASE_PROFILE)
     const size_t op_cycles = mm_read_cycle()-op_start;
     printf("NNC_MATMUL_PROFILE capacity=%lu chunks=%lu ring_slots=8 input_cycles=%lu stream_cycles=%lu output_cycles=%lu op_cycles=%lu\n",

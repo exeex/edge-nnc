@@ -55,8 +55,6 @@ inline void softmax_matrix(Tensor<DType> y, Tensor<DType> x,
 
         if (input_dram) {
             DType *input_src = &x.data[batch_base * cols];
-            edge_dcache_clean_range(input_src,
-                                    batch_elements * sizeof(DType));
             edge_dma_start(input_src, batch_in,
                            batch_elements * sizeof(DType));
             edge_dma_sync();
@@ -99,13 +97,9 @@ inline void softmax_matrix(Tensor<DType> y, Tensor<DType> x,
 
         if (output_dram) {
             DType *output_dst = &y.data[batch_base * cols];
-            edge_dcache_clean_range(output_dst,
-                                    batch_elements * sizeof(DType));
             edge_dma_start(batch_exp, output_dst,
                            batch_elements * sizeof(DType));
             edge_dma_sync();
-            edge_dcache_invalidate_range(output_dst,
-                                         batch_elements * sizeof(DType));
         }
     }
 }

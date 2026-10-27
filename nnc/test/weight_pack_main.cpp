@@ -71,6 +71,9 @@ template<unsigned W, unsigned T, unsigned S> static int run()
     reset_allocator();
     Tensor<nnedge::bfloat16_t> tx(Shape(rows,k), x), ty(Shape(rows,n), y);
     Tensor<Pack> slots(Shape(n/8,groups), packs);
+    // This fixture is a scalar producer; publish before ASIC consumption.
+    scalar_tensor_publish(tx);
+    scalar_tensor_publish(slots);
     // Reject byte counts masquerading as pack counts and incomplete K groups.
     if (op::linear_weight_slots(ty, tx, Tensor<Pack>(Shape(sizeof(packs)),packs))) return 1;
     if (op::linear_weight_slots(ty, Tensor<nnedge::bfloat16_t>(Shape(rows,k-1),x), slots)) return 2;
@@ -84,6 +87,7 @@ template<unsigned W, unsigned T, unsigned S> static int run()
         else ok = op::linear_weight_slots(ty,tx,slots);
     } else ok = op::linear_weight_slots(ty,tx,slots);
     if (!ok) return 3;
+    scalar_tensor_acquire(ty);
     for (unsigned row = 0; row < rows; ++row)
         for (unsigned r = 0; r < n; ++r) {
             int twice_expected = 0;

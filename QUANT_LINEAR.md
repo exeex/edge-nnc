@@ -166,7 +166,7 @@ already built:
 
 ```sh
 python nnc/benchmark_quant.py \
-  --out-dir build/quant-planned-io \
+  --out-dir build/quant-dma-owned \
   --sim-exe /path/to/Vedge32_tensor_integration_tb \
   --edge32-include /path/to/edge-32/include \
   --e3-include /path/to/edge-e3/include
@@ -196,7 +196,7 @@ The legacy contiguous export has separate correctness regressions.
 Artifacts include per-case generated headers, physical-layout metadata, ELF
 images, raw logs, `results.md/csv/json`, and `provenance.json` with source,
 compiler, simulator and payload hashes plus revisions/dirty state. The
-consuming workspace's `build/quant-planned-io/` contains this run's evidence.
+consuming workspace's `build/quant-dma-owned/` contains this run's evidence.
 A Q8_0 generated-forward command trace additionally verifies exactly three
 DMA starts: ordinary 16 KiB input, circular weight stream, ordinary 16 KiB
 output; zero Tensor COPY starts.
@@ -206,9 +206,14 @@ Measured 2026-10-28 on E3 `851bc5b6`, Edge-32 `55a089b3`, wide H4, LLVM
 
 | Quant, capacity 128 | Stream cycles | Stream utilization | SRAM operator cycles | SRAM operator utilization | With ordinary I/O DMA | With DMA utilization |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| NVFP4 | 8,835 | 92.72% | 9,789 | 83.69% | 20,584 | 39.80% |
-| MXFP4 | 8,861 | 92.45% | 9,761 | 83.93% | 20,558 | 39.85% |
-| Q8_0 | 8,765 | 93.46% | 9,900 | 82.75% | 20,697 | 39.58% |
+| NVFP4 | 8,833 | 92.74% | 9,423 | 86.94% | 20,559 | 39.85% |
+| MXFP4 | 8,861 | 92.45% | 9,403 | 87.12% | 20,541 | 39.88% |
+| Q8_0 | 8,765 | 93.46% | 9,210 | 88.95% | 20,344 | 40.27% |
+
+These measurements follow the [tensor ownership contract](MEMORY_OWNERSHIP.md):
+ASIC/DMA operators do not clean or invalidate D-cache. Removing redundant
+cache maintenance reduced SRAM operator cycles from 9,789/9,761/9,900 to
+9,423/9,403/9,210 for NVFP4/MXFP4/Q8_0 respectively.
 
 The previous benchmark unnecessarily loaded contiguous SRAM operands and then
 repacked them inside each op with 2048 Tensor COPY starts. Its ~132k-cycle
