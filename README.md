@@ -33,6 +33,11 @@ through WSLD; see [FP4_LINEAR.md](FP4_LINEAR.md). Wrap `nn.Linear` using `nnc.Li
 E3 BF22-in-FP32 tile-mode PSUM path and rounds only the final output to BF16.
 
 Canonical repository: https://github.com/exeex/edge-nnc.
+
+BF16 Matmul and Matmul-transpose keep RHS as runtime data. DMA XY hardware
+slices it into a fixed eight-slot BF16 ring; NNC does not quantize or prepack
+that RHS. See [MATMUL.md](MATMUL.md) for parameters, token chunking, planned
+SRAM IO and runtime-mutation benchmarks.
 Consuming workspaces can pin this compiler/runtime pair as a Git submodule.
 
 For operator cycle counts, pass `--profile` to `nnc/run_smoke.py`. Runtime
@@ -65,3 +70,9 @@ to this one source. The consuming workspace tracks generated Llama headers
 beside its main but ignores the larger binary payloads; its runner regenerates
 those on each run with `--generated-dir`. The four small quantized Linear
 examples continue to replay their Git-tracked headers and binary snapshots.
+
+For SRAM-native quant Linear, `nnc.compile(..., tensor_tile_io=True,
+quant_token_capacity=128)` exports a preplanned tensor-storage ABI for a
+single quant Linear. Its complete I/O uses ordinary DMA and its SRAM kernel
+performs no I/O staging copies. See [QUANT_LINEAR.md](QUANT_LINEAR.md#compile-time-capacity-and-preplanned-tensor-io)
+for the explicit layout contract, current graph/size limits and benchmark.

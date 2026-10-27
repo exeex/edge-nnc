@@ -88,6 +88,137 @@ with the BF16 output ready. The numerical reference uses the same normal-range
 BF22 dot, scale multiplication and partial-sum boundaries as FP4; it is not a
 bit-true exceptional-value hardware model. See [FP4_LINEAR.md](FP4_LINEAR.md).
 
+## Compile-time capacity and preplanned tensor IO
+
+All named quant C++ entries accept `MaxTokens`, defaulting to 64. NNC can
+explicitly select the 32/64/128-token variants. Capacity remains bounded by
+available SRAM; a smaller final chunk is supported.
+
+The preplanned path uses an explicit `nnedge::TensorTileView`: logical shape
+`[tokens, channels]`, physical storage `[channels/8, tokens, 8]`. NNC arranges
+this storage before execution. The view performs no copy or conversion.
+Inputs and outputs already in working SRAM are used directly. The kernel
+allocates only FP32 partial sums and the circular weight ring; it does not
+stage another copy of the input/output and submits no Tensor COPY commands.
+A chunk points into each block using the full tensor's token extent, so
+32/64-token versions and capacity-limited tails also need no SRAM repacking.
+
+```cpp
+using nnedge::TensorTileView;
+// x/y are already in tensor working SRAM; slots are in DRAM.
+nnedge::op::linear_mxfp4<128>(TensorTileView(y), TensorTileView(x), slots);
+nnedge::op::linear_nvfp4<128>(TensorTileView(y), TensorTileView(x), slots, global_scale_bits);
+nnedge::op::linear_q8_0<128>(TensorTileView(y), TensorTileView(x), slots);
+```
+
+For a complete tensor whose DRAM and SRAM storage use the same planned layout,
+`load_tensor_sram` and `store_tensor_sram` each submit **one ordinary DMA**.
+They reject SRAM-to-SRAM transfers. They do not use strided DMA. Circular
+weight DMA still follows the format's scale/weight slot layout.
+
+Export the preplanned ABI through NNC:
+
+```python
+nnc.compile(model, (x,), out_dir="build/linear", save_reference=True,
+            tensor_tile_io=True, quant_token_capacity=128)
+```
+
+Or use `nnc.compiler --tensor-tile-io --quant-token-capacity 128 ...`.
+The compiler serializes the example input into tensor order, generates SRAM
+allocation and `TensorTileView` calls, and records the physical IO ABI in
+`io_layout.json`. `expected.bin` and the exported output storage use this
+same physical order. A dynamic input producer must supply this planned order;
+the option does not transpose dynamic data invisibly at runtime. Logical
+PyTorch model inputs/outputs and the reference computation are unchanged.
+
+This quant export supports **one quant Linear without bias**, with
+its complete I/O fitting the 96 KiB tensor arena. It rejects incompatible
+multi-op graphs or oversized I/O instead of applying the layout to operators
+that do not understand it. The same compiler option separately supports a
+single BF16 Matmul with an unmodified runtime RHS; see [MATMUL.md](MATMUL.md).
+Layout propagation through a whole model and
+optimal capacity selection are future NNC work. The default export remains
+the existing contiguous ABI. Existing ordinary `Tensor` overloads retain
+that ABI and its compatibility staging; do not pass contiguous bytes to a
+`TensorTileView`.
+
+For 128 tokens and K=N=64, working input/output occupy 32 KiB. Additional
+scratch is 5,248 bytes (NVFP4), 6,272 bytes (MXFP4), or 5,184 bytes (Q8_0).
+Scratch avoids the allocator high-water mark and explicitly supplied SRAM
+buffers, including buffers placed above the allocator cursor. All consumers
+finish before the synchronous op returns. Other manually placed live buffers
+must be represented in the allocator high-water mark.
+
+The original contiguous path retains its default 32 KiB scratch contract;
+variants above 64 may borrow unused arena space for their private staging.
+The 4096×4096 example cannot stage 128 tokens even with all 128 KiB free:
+its contiguous-path capacity planner permits at most seven before accounting
+for other live tensors. That example is a planner check, not a claim that its
+complete I/O can reside in the SRAM-native mode.
+
+## 64×64 weights, 128-token SRAM benchmark
+
+From the NNC repository root, with the consuming workspace's wide-H4 simulator
+already built:
+
+```sh
+python nnc/benchmark_quant.py \
+  --out-dir build/quant-planned-io \
+  --sim-exe /path/to/Vedge32_tensor_integration_tb \
+  --edge32-include /path/to/edge-32/include \
+  --e3-include /path/to/edge-e3/include
+```
+
+This runs NVFP4, MXFP4 and Q8_0 at capacities 32, 64 and 128. Repeated `--spec`
+and `--capacity` options select subsets. The same dense source weights are
+compiled through NNC. Weights stay in DRAM; planned input/output use working
+SRAM directly. There is no warmup invocation. All 8192 BF16 output values
+must exactly match the format-specific NNC golden in its planned storage.
+
+`NNEDGE_QUANT_PROFILE=1` enables two kernel measurements. The stream window
+starts before circular weight DMA submission and ends after tensor and DMA
+sync, matching the original tiled circular benchmark's timing scope. For
+multiple chunks, stream windows are summed. Operator time also includes setup
+and capacity checks. Profile printing is outside both windows. The report
+additionally lists ordinary I/O DMA costs and their sum with operator cycles,
+so moving a transfer outside kernel timing does not hide its cost.
+
+The runner checks 524,288 MACs, 8192 ideal cycles at 64 MACs/cycle, the compute
+START count and zero extra COPY starts. Each 128-token format also verifies
+its generated `forward.hpp`, allocator guards, manually placed SRAM input,
+reduced capacity, and equality across chunk boundaries. With 4 KiB scratch
+remaining, native capacities reduce to 92 (NVFP4), 60 (MXFP4), or 94 (Q8_0).
+The legacy contiguous export has separate correctness regressions.
+
+Artifacts include per-case generated headers, physical-layout metadata, ELF
+images, raw logs, `results.md/csv/json`, and `provenance.json` with source,
+compiler, simulator and payload hashes plus revisions/dirty state. The
+consuming workspace's `build/quant-planned-io/` contains this run's evidence.
+A Q8_0 generated-forward command trace additionally verifies exactly three
+DMA starts: ordinary 16 KiB input, circular weight stream, ordinary 16 KiB
+output; zero Tensor COPY starts.
+
+Measured 2026-10-28 on E3 `851bc5b6`, Edge-32 `55a089b3`, wide H4, LLVM
+22.1.8, RV32IM/Zba, `-O2`, with this compiler/runtime change applied:
+
+| Quant, capacity 128 | Stream cycles | Stream utilization | SRAM operator cycles | SRAM operator utilization | With ordinary I/O DMA | With DMA utilization |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| NVFP4 | 8,835 | 92.72% | 9,789 | 83.69% | 20,584 | 39.80% |
+| MXFP4 | 8,861 | 92.45% | 9,761 | 83.93% | 20,558 | 39.85% |
+| Q8_0 | 8,765 | 93.46% | 9,900 | 82.75% | 20,697 | 39.58% |
+
+The previous benchmark unnecessarily loaded contiguous SRAM operands and then
+repacked them inside each op with 2048 Tensor COPY starts. Its ~132k-cycle
+operator/~6.2% utilization describes that older path. The new measurement
+uses NNC-planned physical IO; it is not a speedup of an unchanged contiguous
+SRAM ABI. All preparation required by the new planned ABI is explicit, and
+ordinary boundary DMA is reported separately above.
+
+The original `matmul64x64_128tokens_tiled_circular.cpp` reference measured
+8,638 stream cycles (94.84%) on the same simulator/compiler. Its INT8 identity
+weights and legacy partial-sum mode differ from quant's dense scaled weights
+and FP32 partial sums, so the stream gap is not isolated WSLD latency.
+
 Generate artifacts without a platform build:
 
 ```sh

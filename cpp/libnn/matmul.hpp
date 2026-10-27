@@ -1,305 +1,189 @@
 #pragma once
+#include "tensor_tile_view.hpp"
 
-#include "tensor.hpp"
-#include "edge_intrinsic.hpp"
+#ifndef NNEDGE_MATMUL_PROFILE
+#define NNEDGE_MATMUL_PROFILE 0
+#endif
 
 namespace nnedge::op {
+// Runtime BF16 RHS stays in its original matrix order in DRAM. The DMA XY
+// slicer builds eight 128-byte tiles in SRAM; no CPU payload manipulation.
+constexpr size_t kMatmulRingSlots = 8;
+constexpr size_t kMatmulRingBytes = kMatmulRingSlots*128;
 
 inline size_t mm_read_cycle()
 {
-#ifdef NNEDGE_PHASE_PROFILE
-    size_t value;
-    __asm__ volatile("rdcycle %0" : "=r"(value));
-    return value;
+#if NNEDGE_MATMUL_PROFILE || defined(NNEDGE_PHASE_PROFILE)
+    return edge_get_cycle();
 #else
     return 0;
 #endif
 }
 
-inline size_t mm_blocked_index(size_t blk, size_t token, size_t lane)
+inline size_t mm_scratch_bytes(size_t rows, size_t k, size_t n, bool native)
 {
-    return (blk * 64u * 8u) + (token * 8u) + lane;
+    const size_t staged_rows = (rows+3u)&~3u;
+    return (native ? 0 : align_bytes(rows*k*2)+align_bytes(rows*n*2))
+         + align_bytes(staged_rows*n*4)+kMatmulRingBytes;
 }
 
-inline size_t mm_row_major_index(size_t row, size_t col, size_t cols)
+// TensorTileView selects preplanned LHS/output storage. RHS is always the
+// unmodified runtime matrix, never a quantized or compile-time packed weight.
+template <unsigned MaxTokens = 128, bool NativeIO = false>
+inline bool matmul_dispatch(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
+                           Tensor<bfloat16_t> rhs, bool transposed, size_t heads)
 {
-    return row * cols + col;
-}
+    static_assert(MaxTokens > 0, "token capacity must be positive");
+    const size_t op_start = mm_read_cycle();
+    if (!heads || !lhs.data || !rhs.data || !y.data || rhs.shape.rank != 2 ||
+        (lhs.shape.rank != 2 && (transposed || lhs.shape.rank != 3))) return false;
+    const bool explicit_heads = !transposed && lhs.shape.rank == 3;
+    if (explicit_heads && lhs.shape.dims[0] != heads) return false;
+    const size_t rows = lhs.shape.dims[explicit_heads ? 1 : 0];
+    const size_t lhs_width = lhs.shape.dims[lhs.shape.rank-1];
+    const size_t rhs_stride = rhs.shape.dims[1];
+    if ((transposed && lhs_width%heads) || (!transposed && rhs_stride%heads)) return false;
+    const size_t k = transposed ? lhs_width/heads : lhs_width;
+    const size_t n = transposed ? rhs.shape.dims[0] : rhs_stride/heads;
+    if (!rows || !k || !n || k%8 || n%8 ||
+        (transposed ? rhs_stride != lhs_width : rhs.shape.dims[0] != k)) return false;
+    if (transposed) {
+        if (y.shape.rank != 3 || y.shape.dims[0] != heads ||
+            y.shape.dims[1] != rows || y.shape.dims[2] != n) return false;
+    } else if (y.shape.rank != 2 || y.shape.dims[0] != rows || y.shape.dims[1] != heads*n)
+        return false;
+    if (is_dtcm_addr(rhs.data)) return false;
+    if constexpr (NativeIO) {
+        if (!is_dtcm_addr(lhs.data) || !is_dtcm_addr(y.data) ||
+            (reinterpret_cast<size_t>(lhs.data)&15u) || (reinterpret_cast<size_t>(y.data)&15u))
+            return false;
+    } else if (is_dtcm_addr(lhs.data) || is_dtcm_addr(y.data)) return false;
 
-inline size_t mm_packed_stage_index(size_t row, size_t col)
-{
-    return row * 8u + col;
-}
-
-struct alignas(16) MmBf16x8 {
-    uint64_t lo;
-    uint64_t hi;
-};
-
-inline void mm_copy_bf16x8(bfloat16_t *dst, const bfloat16_t *src)
-{
-    const MmBf16x8 value = *reinterpret_cast<const MmBf16x8 *>(src);
-    *reinterpret_cast<MmBf16x8 *>(dst) = value;
-}
-
-template <typename DType>
-inline void matmul_reference(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
-                             bool rhs_transposed, size_t head_count)
-{
-    const bool lhs_has_head_axis = !rhs_transposed && lhs.shape.rank >= 3u;
-    const size_t rows = rhs_transposed ? lhs.shape.dims[0]
-                                       : (lhs_has_head_axis ? lhs.shape.dims[1]
-                                                            : lhs.shape.dims[0]);
-    const size_t k_cols = rhs_transposed
-                              ? lhs.shape.dims[1] / head_count
-                              : (lhs_has_head_axis ? lhs.shape.dims[2]
-                                                   : lhs.shape.dims[1]);
-    const size_t out_cols = rhs_transposed
-                                ? rhs.shape.dims[0]
-                                : rhs.shape.dims[1] / head_count;
-    const size_t lhs_row_stride = rhs_transposed ? lhs.shape.dims[1] : k_cols;
-    const size_t rhs_row_stride = rhs.shape.dims[1];
-    const size_t out_row_stride = rhs_transposed ? out_cols : y.shape.dims[1];
-
-    for (size_t head = 0; head < head_count; ++head) {
-        const size_t lhs_head_offset = rhs_transposed
-                                           ? head * k_cols
-                                           : (lhs_has_head_axis
-                                                  ? head * rows * k_cols
-                                                  : 0u);
-        const size_t rhs_head_offset =
-            head * (rhs_transposed ? k_cols : out_cols);
-        const size_t out_head_offset = rhs_transposed
-                                           ? head * rows * out_cols
-                                           : head * out_cols;
-        for (size_t row = 0; row < rows; ++row) {
-            for (size_t out_col = 0; out_col < out_cols; ++out_col) {
-                float acc = 0.0f;
-                for (size_t k = 0; k < k_cols; ++k) {
-                    const float av =
-                        lhs.data[lhs_head_offset + row * lhs_row_stride + k]
-                            .to_float();
-                    const size_t rhs_index = rhs_transposed
-                        ? out_col * rhs_row_stride + rhs_head_offset + k
-                        : k * rhs_row_stride + rhs_head_offset + out_col;
-                    acc += av * rhs.data[rhs_index].to_float();
+    // Work on one head/chunk at a time. Borrow only the unused arena tail;
+    // explicit SRAM views above the allocator cursor are also protected.
+    size_t offset = align_bytes(dtcm_cursor());
+    if constexpr (NativeIO) {
+        const size_t lhs_end = reinterpret_cast<size_t>(lhs.data)-dtcm_base()+numel(lhs)*2;
+        const size_t y_end = reinterpret_cast<size_t>(y.data)-dtcm_base()+numel(y)*2;
+        if (lhs_end > offset) offset = align_bytes(lhs_end);
+        if (y_end > offset) offset = align_bytes(y_end);
+    }
+    if (offset > kDtcmBytes) return false;
+    size_t capacity = rows < MaxTokens ? rows : MaxTokens;
+    while (capacity && mm_scratch_bytes(capacity,k,n,NativeIO) > kDtcmBytes-offset) --capacity;
+    if (!capacity) return false;
+    auto *scratch = reinterpret_cast<unsigned char *>(dtcm_base()+offset);
+    auto *input = reinterpret_cast<bfloat16_t *>(scratch);
+    auto *output = reinterpret_cast<bfloat16_t *>(scratch+(NativeIO ? 0 : align_bytes(capacity*k*2)));
+    auto *psum = reinterpret_cast<float *>(reinterpret_cast<unsigned char *>(output)+
+                                         (NativeIO ? 0 : align_bytes(capacity*n*2)));
+    auto *ring = reinterpret_cast<unsigned char *>(psum)+align_bytes(((capacity+3u)&~3u)*n*4);
+    edge_dcache_clean_range(rhs.data,numel(rhs)*2);
+    if constexpr (!NativeIO) {
+        edge_dcache_clean_range(lhs.data,numel(lhs)*2);
+        edge_dcache_clean_range(y.data,numel(y)*2);
+    }
+    edge_tensor_setwtype<EDGE_TENSOR_WTYPE_BF16>();
+    size_t input_cycles = 0, stream_cycles = 0, output_cycles = 0, chunks = 0;
+    const size_t kb_count = k/8, ob_count = n/8;
+    for (size_t head=0; head<heads; ++head) {
+        for (size_t base=0; base<rows; base+=capacity) {
+            const size_t batch = rows-base < capacity ? rows-base : capacity;
+            const size_t input_begin = NativeIO ? 0 : mm_read_cycle();
+            if constexpr (!NativeIO) {
+                const size_t lhs_head = transposed ? head*k : explicit_heads ? head*rows*k : 0;
+                for (size_t kb=0; kb<kb_count; ++kb) {
+                    edge_dma_start_strided(lhs.data+lhs_head+base*lhs_width+kb*8,
+                        input+kb*batch*8,16u,lhs_width*2,batch);
+                    edge_dma_sync();
                 }
-                y.data[out_head_offset + row * out_row_stride + out_col] =
-                    DType::from_float(acc);
             }
-        }
-    }
-}
-
-template <typename DType>
-inline void matmul_dispatch(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
-                            bool rhs_transposed, size_t head_count)
-{
-    if (head_count == 0u) {
-        return;
-    }
-    const bool lhs_has_head_axis = !rhs_transposed && lhs.shape.rank >= 3u;
-    const size_t rows = rhs_transposed ? lhs.shape.dims[0]
-                                       : (lhs_has_head_axis ? lhs.shape.dims[1]
-                                                            : lhs.shape.dims[0]);
-    const size_t total_width = rhs_transposed ? lhs.shape.dims[1] : rhs.shape.dims[1];
-    if ((total_width % head_count) != 0u) {
-        return;
-    }
-    const size_t k_cols = rhs_transposed
-                              ? total_width / head_count
-                              : (lhs_has_head_axis ? lhs.shape.dims[2]
-                                                   : lhs.shape.dims[1]);
-    const size_t out_cols = rhs_transposed
-                                ? rhs.shape.dims[0]
-                                : total_width / head_count;
-    const size_t lhs_row_stride = lhs.shape.dims[lhs.shape.rank - 1u];
-    if ((k_cols % 8u) != 0u || (out_cols % 8u) != 0u) {
-        return;
-    }
-    const bool lhs_dram = !is_dtcm_addr(lhs.data);
-    const bool rhs_dram = !is_dtcm_addr(rhs.data);
-    const bool output_dram = !is_dtcm_addr(y.data);
-    if (!lhs_dram || !rhs_dram || !output_dram) {
-        alloc_failed() = true;
-        return;
-    }
-    const size_t rhs_row_stride = rhs.shape.dims[1];
-    const size_t output_stage_elems = head_count * rows * out_cols;
-    const size_t input_stage_elems = head_count * rows * k_cols;
-    const size_t weight_stage_elems =
-        head_count * (k_cols / 8u) * (out_cols / 8u) * 8u * 8u;
-    const size_t scratch_bytes =
-        (output_stage_elems + input_stage_elems + weight_stage_elems) *
-        sizeof(bfloat16_t);
-    if (scratch_bytes > kDtcmOpScratchBytes) {
-        alloc_failed() = true;
-        return;
-    }
-    bfloat16_t *scratch = dtcm_op_scratch<bfloat16_t>();
-    bfloat16_t *output_stage = scratch;
-    bfloat16_t *input_stage = output_stage + output_stage_elems;
-    bfloat16_t *w_stage = input_stage + input_stage_elems;
-
-    const size_t k_blocks = k_cols / 8u;
-    const size_t out_blocks = out_cols / 8u;
-    const size_t total_tiles = head_count * k_blocks * out_blocks;
-    configure_bf16_tensor();
-    edge_tensor_setn(rows);
-    const size_t profile_begin = mm_read_cycle();
-    size_t profile_lhs_issue = 0u;
-    size_t profile_lhs_wait = 0u;
-
-    // Public tensors are contiguous [row, width] or [head, row, width].
-    // Tensor consumes [head, k_block, row, lane], so keep that packing private.
-    for (size_t global_k = 0; global_k < head_count * k_blocks; ++global_k) {
-        const size_t head = global_k / k_blocks;
-        const size_t k_blk = global_k % k_blocks;
-        const size_t head_offset = lhs_has_head_axis
-            ? head * rows * k_cols
-            : head * k_cols;
-        const size_t lhs_issue_begin = mm_read_cycle();
-        edge_dma_start_strided(
-            lhs.data + head_offset + k_blk * 8u,
-            input_stage + global_k * rows * 8u,
-            8u * sizeof(DType), lhs_row_stride * sizeof(DType), rows);
-        profile_lhs_issue += mm_read_cycle() - lhs_issue_begin;
-        const size_t lhs_wait_begin = mm_read_cycle();
-        edge_dma_sync();
-        profile_lhs_wait += mm_read_cycle() - lhs_wait_begin;
-    }
-    const size_t profile_lhs_done = mm_read_cycle();
-
-    const size_t tile_rows = rows * 8u;
-    size_t tiles_left = total_tiles;
-    if (rhs_transposed) {
-        // Entry order: head, k_blk, out_blk. X walks output rows and every
-        // eight fragments publish one BF16 8x8 entry.
-        edge_dma_start_strided_circular(
-            rhs.data, w_stage, 8u * sizeof(bfloat16_t),
-            rhs_row_stride * sizeof(bfloat16_t), out_cols,
-            8u * sizeof(bfloat16_t), head_count * k_blocks,
-            8u * 8u * sizeof(bfloat16_t), total_tiles);
-        edge_tensor_wld_circular();
-
-        for (size_t global_k = 0; global_k < head_count * k_blocks;
-             ++global_k) {
-            const size_t head = global_k / k_blocks;
-            const size_t k_blk = global_k % k_blocks;
-            // START copies staged configuration to the next descriptor bank.
-            // I is constant across this output-tile loop; stage it once.
-            edge_tensor_setin(input_stage + global_k * tile_rows);
-            bfloat16_t *output_ptr = output_stage + head * out_blocks * tile_rows;
-            for (size_t out_blk = 0; out_blk < out_blocks; ++out_blk) {
-                edge_tensor_setout(output_ptr);
-                if (k_blk == 0u) {
-                    edge_tensor_start<EDGE_TENSOR_START_OPT_NO_PSUM>();
-                } else {
-                    edge_tensor_setpsum(output_ptr);
-                    edge_tensor_start();
+            if constexpr (!NativeIO) input_cycles += mm_read_cycle()-input_begin;
+            edge_tensor_setn(batch);
+            const size_t stream_begin = mm_read_cycle();
+            // One XY command for the entire head/chunk. Eight 16-byte source
+            // fragments form each tile, and producer/consumer recycle 8 slots.
+            edge_dma_start_strided_circular(
+                rhs.data+head*(transposed ? k : n),ring,16u,rhs_stride*2,
+                transposed ? n : k,16u,transposed ? kb_count : ob_count,
+                128u,kMatmulRingSlots);
+            if (transposed) edge_tensor_wld_circular();
+            else edge_tensor_wld_t_circular();
+            size_t tiles_left = kb_count*ob_count;
+            auto submit = [&](size_t kb,size_t ob) __attribute__((always_inline)) {
+                const size_t lhs_head = (explicit_heads || transposed) ? head*kb_count*rows*8 : 0;
+                bfloat16_t *xp = NativeIO ? lhs.data+lhs_head+(kb*rows+base)*8 : input+kb*batch*8;
+                bfloat16_t *yp = NativeIO ? y.data+((head*ob_count+ob)*rows+base)*8 : output+ob*batch*8;
+                float *pp = psum+ob*((batch+3u)&~3u)*8;
+                edge_tensor_setin(xp);
+                edge_tensor_setpsum(pp);
+                edge_tensor_setout(kb+1 == kb_count ? static_cast<void *>(yp) : static_cast<void *>(pp));
+                if (kb_count == 1) edge_tensor_start<EDGE_TENSOR_START_SINGLE_TILE>();
+                else if (kb == 0) edge_tensor_start<EDGE_TENSOR_START_FIRST_TILE>();
+                else if (kb+1 == kb_count) edge_tensor_start<EDGE_TENSOR_START_LAST_TILE>();
+                else edge_tensor_start<EDGE_TENSOR_START_PSUM_TILE>();
+                if (--tiles_left) {
+                    if (transposed) edge_tensor_wld_circular();
+                    else edge_tensor_wld_t_circular();
                 }
-                if (--tiles_left != 0u)
-                    edge_tensor_wld_circular();
-                output_ptr += tile_rows;
+            };
+            // Loop interchange follows DMA tile order; only command/parameter
+            // loops run on the CPU. No software loop loads or stores elements.
+            if (transposed) {
+                for (size_t kb=0; kb<kb_count; ++kb)
+                    for (size_t ob=0; ob<ob_count; ++ob) submit(kb,ob);
+            } else {
+                for (size_t ob=0; ob<ob_count; ++ob)
+                    for (size_t kb=0; kb<kb_count; ++kb) submit(kb,ob);
             }
-        }
-    } else {
-        // Entry order: head, out_blk, k_blk. X walks K rows and every eight
-        // fragments publish one transposed-WLD entry.
-        edge_dma_start_strided_circular(
-            rhs.data, w_stage, 8u * sizeof(bfloat16_t),
-            rhs_row_stride * sizeof(bfloat16_t), k_cols,
-            8u * sizeof(bfloat16_t), head_count * out_blocks,
-            8u * 8u * sizeof(bfloat16_t), total_tiles);
-        edge_tensor_wld_t_circular();
-
-        for (size_t global_out = 0; global_out < head_count * out_blocks;
-             ++global_out) {
-            const size_t head = global_out / out_blocks;
-            bfloat16_t *output_ptr = output_stage + global_out * tile_rows;
-            bfloat16_t *input_ptr = input_stage + head * k_blocks * tile_rows;
-            // O and P remain fixed across K tiles. NO_PSUM ignores the staged
-            // P on the first tile; later STARTs inherit both pointers.
-            edge_tensor_setout(output_ptr);
-            edge_tensor_setpsum(output_ptr);
-            for (size_t k_blk = 0; k_blk < k_blocks; ++k_blk) {
-                edge_tensor_setin(input_ptr);
-                if (k_blk == 0u) {
-                    edge_tensor_start<EDGE_TENSOR_START_OPT_NO_PSUM>();
-                } else {
-                    edge_tensor_start();
-                }
-                if (--tiles_left != 0u)
-                    edge_tensor_wld_t_circular();
-                input_ptr += tile_rows;
-            }
-        }
-    }
-    edge_tensor_sync();
-    edge_dma_sync();
-    const size_t profile_tensor_done = mm_read_cycle();
-
-    const size_t output_bytes = numel(y) * sizeof(DType);
-    edge_dcache_clean_range(y.data, output_bytes);
-    const size_t profile_output_clean_done = mm_read_cycle();
-    size_t profile_output_issue = 0u;
-    size_t profile_output_wait = 0u;
-    // Tensor produces [head, out_block, row, lane]. Restore the public
-    // contiguous layout with one source-strided DMA per output row/head.
-    for (size_t head = 0; head < head_count; ++head) {
-        for (size_t row = 0; row < rows; ++row) {
-            const size_t output_issue_begin = mm_read_cycle();
-            DType *output_dst = rhs_transposed
-                ? y.data + (head * rows + row) * out_cols
-                : y.data + row * y.shape.dims[1] + head * out_cols;
-            edge_dma_start_strided(
-                output_stage + head * out_blocks * rows * 8u + row * 8u,
-                output_dst, 8u * sizeof(DType),
-                rows * 8u * sizeof(DType), out_blocks);
-            profile_output_issue += mm_read_cycle() - output_issue_begin;
-            const size_t output_wait_begin = mm_read_cycle();
+            edge_tensor_sync();
             edge_dma_sync();
-            profile_output_wait += mm_read_cycle() - output_wait_begin;
+            stream_cycles += mm_read_cycle()-stream_begin;
+            ++chunks;
+            const size_t output_begin = NativeIO ? 0 : mm_read_cycle();
+            if constexpr (!NativeIO) {
+                for (size_t row=0; row<batch; ++row) {
+                    auto *dst = transposed ? y.data+(head*rows+base+row)*n
+                                          : y.data+(base+row)*heads*n+head*n;
+                    edge_dma_start_strided(output+row*8,dst,16u,batch*16,ob_count);
+                    edge_dma_sync();
+                }
+            }
+            if constexpr (!NativeIO) output_cycles += mm_read_cycle()-output_begin;
         }
     }
-    const size_t profile_output_done = mm_read_cycle();
-#ifdef NNEDGE_PHASE_PROFILE
-    edge_sim_printf("MATMUL_PHASE lhs=%lu(lhs_issue=%lu lhs_wait=%lu) tensor=%lu output_clean=%lu output_dma=%lu(out_issue=%lu out_wait=%lu) total=%lu\n",
-           profile_lhs_done - profile_begin,
-           profile_lhs_issue, profile_lhs_wait,
-           profile_tensor_done - profile_lhs_done,
-           profile_output_clean_done - profile_tensor_done,
-           profile_output_done - profile_output_clean_done,
-           profile_output_issue, profile_output_wait,
-           profile_output_done - profile_begin);
+    if constexpr (!NativeIO) edge_dcache_invalidate_range(y.data,numel(y)*2);
+#if NNEDGE_MATMUL_PROFILE || defined(NNEDGE_PHASE_PROFILE)
+    const size_t op_cycles = mm_read_cycle()-op_start;
+    printf("NNC_MATMUL_PROFILE capacity=%lu chunks=%lu ring_slots=8 input_cycles=%lu stream_cycles=%lu output_cycles=%lu op_cycles=%lu\n",
+           (unsigned long)capacity,(unsigned long)chunks,(unsigned long)input_cycles,
+           (unsigned long)stream_cycles,(unsigned long)output_cycles,(unsigned long)op_cycles);
 #endif
+    return !alloc_failed();
 }
 
-template <typename DType>
-inline void matmul_transpose(Tensor<DType> y, Tensor<DType> lhs,
-                             Tensor<DType> rhs, size_t head_count)
+template <unsigned MaxTokens = 128>
+inline void matmul(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
+                   Tensor<bfloat16_t> rhs, size_t heads=1)
 {
-    matmul_dispatch(y, lhs, rhs, true, head_count);
+    if (!matmul_dispatch<MaxTokens>(y,lhs,rhs,false,heads)) alloc_failed() = true;
 }
-
-template <typename DType>
-inline void matmul_transpose(Tensor<DType> y, Tensor<DType> lhs,
-                             Tensor<DType> rhs)
+template <unsigned MaxTokens = 128>
+inline void matmul_transpose(Tensor<bfloat16_t> y, Tensor<bfloat16_t> lhs,
+                             Tensor<bfloat16_t> rhs, size_t heads=1)
 {
-    matmul_transpose(y, lhs, rhs, 1u);
+    if (!matmul_dispatch<MaxTokens>(y,lhs,rhs,true,heads)) alloc_failed() = true;
 }
-
-template <typename DType>
-inline void matmul(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs,
-                   size_t head_count)
+template <unsigned MaxTokens = 128>
+inline void matmul(TensorTileView y, TensorTileView lhs,
+                   Tensor<bfloat16_t> rhs, size_t heads=1)
 {
-    matmul_dispatch(y, lhs, rhs, false, head_count);
+    if (!matmul_dispatch<MaxTokens,true>(y.tensor,lhs.tensor,rhs,false,heads)) alloc_failed() = true;
 }
-
-template <typename DType>
-inline void matmul(Tensor<DType> y, Tensor<DType> lhs, Tensor<DType> rhs)
+template <unsigned MaxTokens = 128>
+inline void matmul_transpose(TensorTileView y, TensorTileView lhs,
+                             Tensor<bfloat16_t> rhs, size_t heads=1)
 {
-    matmul(y, lhs, rhs, 1u);
+    if (!matmul_dispatch<MaxTokens,true>(y.tensor,lhs.tensor,rhs,true,heads)) alloc_failed() = true;
 }
-
 } // namespace nnedge::op

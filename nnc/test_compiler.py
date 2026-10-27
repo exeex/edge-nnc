@@ -294,9 +294,11 @@ class LinearMatmulShapeContractTest(unittest.TestCase):
                 self.matmul(lhs, rhs, heads, transpose)
 
     def test_matmul_scratch_boundary(self):
-        self.matmul((96, 64), (64, 64))  # Exactly 32768 bytes.
+        self.matmul((96, 64), (64, 64))
+        self.matmul((128, 64), (64, 64))  # Runtime chunking, eight RHS slots.
+        self.matmul((1024, 64), (64, 64))
         with self.assertRaisesRegex(SystemExit, "scratch"):
-            self.matmul((97, 64), (64, 64))
+            self.matmul((128, 65536), (65536, 8))
 
 
 if __name__ == "__main__":

@@ -21,61 +21,132 @@ static_assert(sizeof(Q8_0WeightPack) == 272 && sizeof(FP8E4M3FNWeightPack) == 27
 namespace op {
 using FP4SlotLayout = WeightSlotLayout<EDGE_TENSOR_WTYPE_FP4>;
 
+// Compile-time token ceilings; omitted arguments preserve the 64-token kernel.
+// Larger variants may borrow unused SRAM arena space for private staging.
+
+template <unsigned MaxTokens = 64>
 inline bool linear_mxfp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x, Tensor<uint8_t> slots)
 {
-    return linear_weight_slots<MXFP4WeightPack>(y,x,slots);
+    return linear_weight_slots<MXFP4WeightPack,MaxTokens>(y,x,slots);
 }
 
+template <unsigned MaxTokens = 64>
 inline bool linear_nvfp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                         Tensor<uint8_t> slots, uint32_t global_scale_bits)
 {
-    return detail::linear_weight_slots_bytes<NVFP4WeightPack>(y,x,slots,global_scale_bits);
+    return detail::linear_weight_slots_bytes<NVFP4WeightPack,MaxTokens>(y,x,slots,global_scale_bits);
 }
 
+template <unsigned MaxTokens = 64>
 inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<FP4WeightPack> slots)
 {
-    return linear_weight_slots(y, x, slots);
+    return linear_weight_slots<FP4WeightPack,MaxTokens>(y, x,
+        Tensor<uint8_t>(Shape(numel(slots)*sizeof(FP4WeightPack)),
+                        reinterpret_cast<uint8_t *>(slots.data)));
 }
+template <unsigned MaxTokens = 64>
 inline bool linear_fp4(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<uint8_t> slots)
 {
-    return linear_weight_slots<FP4WeightPack>(y, x, slots);
+    return linear_weight_slots<FP4WeightPack,MaxTokens>(y, x, slots);
 }
 
 // Q8_0 runtime spec: preserve native FP16 scale bits and INT8 codes,
 // reordered into E3 tiles before calling this entry point.
+template <unsigned MaxTokens = 64>
 inline bool linear_q8_0(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<Q8_0WeightPack> slots)
 {
-    return linear_weight_slots(y, x, slots);
+    return linear_weight_slots<Q8_0WeightPack,MaxTokens>(y, x,
+        Tensor<uint8_t>(Shape(numel(slots)*sizeof(Q8_0WeightPack)),
+                        reinterpret_cast<uint8_t *>(slots.data)));
 }
+template <unsigned MaxTokens = 64>
 inline bool linear_q8_0(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<uint8_t> slots)
 {
-    return linear_weight_slots<Q8_0WeightPack>(y, x, slots);
+    return linear_weight_slots<Q8_0WeightPack,MaxTokens>(y, x, slots);
 }
 
+template <unsigned MaxTokens = 64>
 inline bool linear_fp8_e4m3fn(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<FP8E4M3FNWeightPack> slots)
 {
-    return linear_weight_slots(y, x, slots);
+    return linear_weight_slots<FP8E4M3FNWeightPack,MaxTokens>(y, x,
+        Tensor<uint8_t>(Shape(numel(slots)*sizeof(FP8E4M3FNWeightPack)),
+                        reinterpret_cast<uint8_t *>(slots.data)));
 }
+template <unsigned MaxTokens = 64>
 inline bool linear_fp8_e4m3fn(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<uint8_t> slots)
 {
-    return linear_weight_slots<FP8E4M3FNWeightPack>(y, x, slots);
+    return linear_weight_slots<FP8E4M3FNWeightPack,MaxTokens>(y, x, slots);
 }
 
+template <unsigned MaxTokens = 64>
 inline bool linear_fp8_e5m2(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<FP8E5M2WeightPack> slots)
 {
-    return linear_weight_slots(y, x, slots);
+    return linear_weight_slots<FP8E5M2WeightPack,MaxTokens>(y, x,
+        Tensor<uint8_t>(Shape(numel(slots)*sizeof(FP8E5M2WeightPack)),
+                        reinterpret_cast<uint8_t *>(slots.data)));
 }
+template <unsigned MaxTokens = 64>
 inline bool linear_fp8_e5m2(Tensor<bfloat16_t> y, Tensor<bfloat16_t> x,
                               Tensor<uint8_t> slots)
 {
-    return linear_weight_slots<FP8E5M2WeightPack>(y, x, slots);
+    return linear_weight_slots<FP8E5M2WeightPack,MaxTokens>(y, x, slots);
+}
+
+// Tensor working SRAM overloads bypass all I/O staging and COPY commands.
+// Public contiguous Tensor overloads above retain their existing semantics.
+template <unsigned MaxTokens = 64>
+inline bool linear_mxfp4(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots)
+{
+    return detail::linear_weight_slots_bytes<MXFP4WeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots);
+}
+
+template <unsigned MaxTokens = 64>
+inline bool linear_nvfp4(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots, uint32_t global_scale_bits)
+{
+    return detail::linear_weight_slots_bytes<NVFP4WeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots,global_scale_bits);
+}
+
+template <unsigned MaxTokens = 64>
+inline bool linear_q8_0(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots)
+{
+    return detail::linear_weight_slots_bytes<Q8_0WeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots);
+}
+
+template <unsigned MaxTokens = 64>
+inline bool linear_fp4(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots)
+{
+    return detail::linear_weight_slots_bytes<FP4WeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots);
+}
+
+template <unsigned MaxTokens = 64>
+inline bool linear_fp8_e4m3fn(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots)
+{
+    return detail::linear_weight_slots_bytes<FP8E4M3FNWeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots);
+}
+
+template <unsigned MaxTokens = 64>
+inline bool linear_fp8_e5m2(TensorTileView y, TensorTileView x,
+                         Tensor<uint8_t> slots)
+{
+    return detail::linear_weight_slots_bytes<FP8E5M2WeightPack,MaxTokens,true>(
+        y.tensor,x.tensor,slots);
 }
 
 } // namespace op

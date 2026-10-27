@@ -321,8 +321,11 @@ class MatmulLowerer(OpLowerer):
             out_shape = (rows, rhs.shape[1])
         if k % 8 or n % 8:
             raise SystemExit("matmul requires K%8=0 and per-head N%8=0")
-        if 2 * head_count * (rows * n + rows * k + k * n) > 32768:
-            raise SystemExit("matmul operands exceed 32 KiB DTCM scratch capacity")
+        # Only eight dynamic RHS tiles are resident. Heads/tokens are streamed
+        # independently; the full runtime matrix is never allocated in SRAM.
+        if ((2*k+63)//64*64 + (2*n+63)//64*64 +
+                (16*n+63)//64*64 + 8*128) > 128*1024:
+            raise SystemExit("matmul minimum chunk exceeds SRAM scratch capacity")
         return LoweredNode(
             (self.output(node.outputs[0], out_shape),),
             "matmul_transpose" if self.rhs_transposed else "matmul",

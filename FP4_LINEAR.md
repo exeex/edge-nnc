@@ -58,7 +58,10 @@ exceptional-value hardware behavior.
 Supported shapes: x[M,K], q[N,K], M positive, K a positive multiple of 32,
 N a positive multiple of 8; weights/scales must be static. Like BF16 Matmul,
 the runtime uses one START per weight tile with `setn=token_count`. It chunks
-M at 64 tokens or a smaller count fitting the 32 KiB scratch budget; the
+M at `MaxTokens` (a C++ template argument defaulting to 64), or a smaller
+count fitting its scratch budget. The default retains 32 KiB scratch;
+variants above 64 may borrow unused SRAM arena space as described in
+[QUANT_LINEAR.md](QUANT_LINEAR.md#compile-time-capacity-and-preplanned-tensor-io). The
 compiler rejects shapes for which even one token cannot fit. Each chunk
 replays the same packed weight slots through the four-slot circular ring.
 
