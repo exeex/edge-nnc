@@ -38,19 +38,24 @@ or NaN NV scales are rejected by the software packer.
 
 An eight-channel group stores eight scale bytes followed by four MX / two NV
 output-major 8x8 E2M1 tiles, earlier nibble low. Native payload sizes are
-136 bytes (MX) and 72 bytes (NV). The current circular transport requires
-16-byte aligned slot bases, so the serialized runtime packs include eight
-tail padding bytes: **144 bytes / 256 weights** for MX and
-**80 bytes / 128 weights** for NV. These are 4.5 and 5 stored bits/weight,
-respectively, plus NV's single four-byte global scalar in the generated code.
-They do not yet attain dense checkpoint storage ratios 4.25 / 4.5 bits/weight.
+136 bytes (MX) and 72 bytes (NV). Two adjacent groups share one physical
+DMA slot: **272 bytes / 512 weights** for MX and **144 bytes / 256 weights**
+for NV. This attains 4.25 / 4.5 bits per weight, respectively, plus NV's
+single four-byte global scalar. There is no interior padding. An odd final
+group has eight trailing padding bytes, so total storage is
+`align_up(group_count * native_group_bytes, 16)`.
 
-This padding is explicit in `WeightPack`; WSLD reads only one-byte scales,
-not BF16 substitutes. Runtime DMA entries use the aligned stride. Dense source
-packing requires a separate transport adaptation: the current AXI-to-DTCM
-stream requires 16-byte aligned sources, while alternate 136/72-byte group
-bases are eight bytes off that alignment. Do not silently change DMA stride
-without handling this source-alignment and group-boundary contract.
+The circular transport contract requires slot bases, physical slot strides
+and ring wrap to align to **128 bits (16 bytes)**. `EdgeCircularDmaLayout`
+checks slot and whole-ring alignment with C++ `static_assert`; `WeightPack`
+and runtime DMA setup instantiate it. Native presets use eight physical
+slots. DMA continues copying complete 128-bit beats and publishing physical
+slot credits without knowing quantization formats. WSLD descriptor bit 20
+selects two groups per slot; the tile field remains tiles per group. WSLD
+retains residual bytes across the middle boundary and requires a fresh scale
+before the second group's weights. It releases the physical slot only after
+both groups complete. For an odd tail, runtime drains DMA/tensor work and
+restarts with one padded group, retaining the partial sums.
 
 The WSLD decoder exactly expands E8M0/E4M3FN to the existing BF16 scale lanes
 before issuing the matched response. The byte cursor and DMA/slot owner use
@@ -79,7 +84,8 @@ bit identity; tested ordinary-range outputs use zero comparison tolerance.
 
 `python -m unittest nnc.test_microscale` checks byte scales, slot order and
 padding, preserved codes, group sizes, global-scale placement, static lowering
-and generated global-scale bits. Six `smoke_linear_{mx,nv}fp4{,_chunks,_single}`
+and generated global-scale bits. Twelve `smoke_linear_{mx,nv}fp4{,_chunks,_single}`
 models exercise multiple groups/channels, token tails, K16-only shapes and
-single-token DTCM operands. The consumer registers them under CTest's
+single-token DTCM operands, repeated circular wrap, odd K-group tails and
+physical pairs crossing output-channel blocks. The consumer registers them under CTest's
 `microscale` label with exact output comparison.

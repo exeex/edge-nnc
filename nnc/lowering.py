@@ -209,11 +209,11 @@ class LinearMicroscaleLowerer(OpLowerer):
         if len(x.shape) != 2 or len(w.shape) != 2:
             raise SystemExit('microscale Linear requires rank-two operands')
         n,k = w.shape
-        slot_bytes = 144 if self.spec == 'mxfp4' else 80
+        slot_bytes = 272 if self.spec == 'mxfp4' else 144
         output_bytes = 2 if self.spec == 'mxfp4' else 4
         if min(n,k,x.shape[0]) <= 0 or n%8 or k%size or x.shape[1] != k:
             raise SystemExit('microscale Linear shape/group mismatch')
-        if ((2*k+63)//64*64 + (output_bytes*n+63)//64*64 + 128 + 4*slot_bytes) > 32768:
+        if ((2*k+63)//64*64 + (output_bytes*n+63)//64*64 + 128 + 8*slot_bytes) > 32768:
             raise SystemExit('microscale Linear operands exceed DTCM scratch capacity')
         params = [tensors.require(name) for name in node.args[1:]]
         if any(p.target not in weights.parameters for p in params):

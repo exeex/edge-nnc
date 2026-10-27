@@ -30,18 +30,30 @@ class MicroscaleTest(unittest.TestCase):
             q=values[(torch.arange(n*k)%8)].reshape(n,k).to(torch.bfloat16)
             scale=torch.full((n,2),127 if spec=='mxfp4' else 0x38,dtype=torch.uint8)
             payload=pack_slots(q,scale,spec)
-            stride=144 if spec=='mxfp4' else 80
+            stride=136 if spec=='mxfp4' else 72
             self.assertEqual(len(payload),4*stride)
             codes=encode_bf16(q)
             for ob in range(2):
                 for group in range(2):
                     slot=payload[(ob*2+group)*stride:(ob*2+group+1)*stride]
                     self.assertEqual(slot[:8],bytes(scale[ob*8:ob*8+8,group].tolist()))
-                    self.assertEqual(slot[8+size*4:],bytes(8))
+                    self.assertEqual(len(slot),8+size*4)
                     for tile in range(size//8):
                         raw=slot[8+tile*32:40+tile*32]
                         unpacked=[nibble for byte in raw for nibble in (byte&15,byte>>4)]
                         self.assertEqual(unpacked,codes[ob*8:ob*8+8,group*size+tile*8:group*size+tile*8+8].flatten().tolist())
+
+    def test_dense_sizes_with_single_final_transport_tail(self):
+        for spec in ('mxfp4','nvfp4'):
+            size=group_k(spec)
+            for n,groups in ((8,1),(8,3),(24,1),(8,32)):
+                model,_=make_case(spec,width=size*groups,outputs=n)
+                q,scale,_=quantize(model.weight,spec)
+                payload=pack_slots(q,scale,spec)
+                native=n//8*groups*(8+size*4)
+                self.assertEqual(len(payload),(native+15)//16*16)
+                self.assertLess(len(payload)-native,16)
+                self.assertEqual(payload[native:],bytes(len(payload)-native))
 
     def test_global_scale_before_bf16_output_and_validation(self):
         x=torch.ones(1,16,dtype=torch.bfloat16)

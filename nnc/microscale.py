@@ -1,7 +1,7 @@
 """Weight-only MXFP4/NVFP4: E2M1 codes and native byte block scales.
 
 Groups are K32/E8M0 for MXFP4, K16/E4M3FN plus one FP32 tensor scale for
-NVFP4. Slots retain the current 16-byte transport alignment (144/80 bytes).
+NVFP4. Groups are dense; only the entire payload has final 16-byte padding.
 """
 import struct
 import torch
@@ -70,7 +70,7 @@ def pack_slots(q, codes, spec):
             for tile in range(size // 8):
                 values = nibbles[ob*8:ob*8+8, group*size+tile*8:group*size+tile*8+8].flatten()
                 payload.extend(bytes((values[::2] | (values[1::2] << 4)).tolist()))
-            payload.extend(bytes((-len(payload)) % 16))
+    payload.extend(bytes((-len(payload)) % 16))
     return bytes(payload)
 
 
