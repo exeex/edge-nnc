@@ -89,5 +89,3 @@ def linear(x: Tensor, weight: Tensor) -> Tensor:
 @linear.register_fake
 def _(x, weight):
     return torch.empty((*x.shape[:-1], weight.shape[0]), dtype=x.dtype, device=x.device)
-
-
