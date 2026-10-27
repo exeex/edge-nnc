@@ -65,8 +65,9 @@ comparison; fake execution does not quantize.
 returns the output directory. The compiler CLI and regenerating model runner use this same
 implementation. `save_reference=True` also snapshots the BF16 output as
 `expected.bin`. Each example's `model.py` has an explicit `__main__` call. In an
-in-place checkout, run it as `python -m example.linear_fp4.model` from the repo
-root so the local `nnc` package is importable.
+editable development checkout, run it as `python -m example.linear_fp4.model`
+from the repo root with the initialized environment's interpreter. This locates
+the example; `nnc` itself is resolved through the editable installation.
 
 The earlier `(x,q,scale)` custom-op signatures remain supported for explicit
 format/precision fixtures. `nnc.fp4.quantize(weight)` produces exact E2M1

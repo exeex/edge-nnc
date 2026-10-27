@@ -1,7 +1,7 @@
 # Edge NNC
 
 Native weight-only `LinearMxFp4` and `LinearNvFp4` use WSLD E8M0/E4M3FN
-scale decoding, with a separate FP32 global-scale epilogue for NVFP4. See
+scale decoding and a BF16-rounded per-tensor global scale for NVFP4. See
 [MICROSCALE_LINEAR.md](MICROSCALE_LINEAR.md) for required hardware, group sizes,
 aligned runtime storage and numerical limits.
 
@@ -12,8 +12,19 @@ The consuming workspace supplies the E3 SDK (`include/edge_e3/`), the
 matching `edge32_intrinsic.hpp` backend and a Verilator simulator. This package contains no RTL or encrypted simulator dependency.
 See `UPSTREAM.md` for the imported source revision and integration changes.
 
-Install with Python 3.12 and `uv sync --extra cpu`. Compiler tests:
+Install editable with Python 3.12 and `uv sync --extra cpu` from this checkout.
+This installs both PyTorch and the `edge-nnc` distribution exposing `import nnc`.
+Use `.venv/bin/python` or activate `.venv`; source edits then take effect
+without reinstalling. Compiler tests:
 `uv run --extra cpu python -m unittest nnc.test_compiler`.
+
+In edge-cores, use its `scripts/setup-python.sh` instead: the workspace owns
+one environment and selects the PyTorch CPU/CUDA backend while installing
+this submodule editable. Do not create a second nested environment there.
+For an existing environment with the intended PyTorch build, install with
+`uv pip install --python /path/to/venv/bin/python -e /path/to/edge-nnc`.
+The matched C++ runtime, fixtures and consumer SDKs remain in their source
+checkouts; the supported development workflow uses an editable installation.
 
 Build a model with `nnc/run_smoke.py --build-only --edge32-include PATH --e3-include PATH`.
 The first path is Edge-32 `include/`; the second is E3 `include/`. The
@@ -63,5 +74,5 @@ The model's initialization retains the original deterministic parameter and
 input values. The legacy model path and `nnc/test/llama3_source.py` are links
 to this one source. The consuming workspace tracks generated Llama headers
 beside its main but ignores the larger binary payloads; its runner regenerates
-those on each run with `--generated-dir`. The four small quantized Linear
+those on each run with `--generated-dir`. The six small quantized Linear
 examples continue to replay their Git-tracked headers and binary snapshots.
