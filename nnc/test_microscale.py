@@ -4,7 +4,7 @@ import unittest
 import torch
 from nnc import compiler
 from nnc.fp4 import encode_bf16
-from nnc.microscale import decode_scales, group_k, quantize, pack_slots, reference, global_bits
+from nnc.microscale import decode_scales, group_k, quantize, pack_slots, reference, global_bits, rounded_global, combined_scales, tensor_dot8
 from nnc.test.smoke_linear_mxfp4 import make_case
 
 
@@ -55,16 +55,29 @@ class MicroscaleTest(unittest.TestCase):
                 self.assertLess(len(payload)-native,16)
                 self.assertEqual(payload[native:],bytes(len(payload)-native))
 
-    def test_global_scale_before_bf16_output_and_validation(self):
+    def test_bf16_global_combined_scale_and_validation(self):
         x=torch.ones(1,16,dtype=torch.bfloat16)
         q=torch.ones(8,16,dtype=torch.bfloat16)
         codes=torch.full((8,1),0x38,dtype=torch.uint8)
         global_scale=torch.tensor(.1234567)
         self.assertTrue(torch.equal(reference(x,q,codes,global_scale,'nvfp4'),
-                                    (torch.full((1,8),16.)*global_scale).to(torch.bfloat16)))
-        self.assertEqual(global_bits(global_scale),struct.unpack('<I',struct.pack('<f',float(global_scale)))[0])
+                                    (torch.full((1,8),16.)*rounded_global(global_scale)).to(torch.bfloat16)))
+        self.assertEqual(global_bits(global_scale),struct.unpack('<I',struct.pack('<f',float(rounded_global(global_scale))))[0])
+        self.assertEqual(global_bits(global_scale) & 0xffff, 0)
+        # A nontrivial BF16 x E4M3 product uses the low BF20 fraction bits.
+        scales = combined_scales(torch.tensor([0x3f],dtype=torch.uint8), torch.tensor(1.9921875))
+        self.assertEqual(float(scales[0]), 1.875*1.9921875)
+        raw = scales.view(torch.int32)
+        self.assertEqual(int(raw[0]) & 0xfff, 0)
+        self.assertNotEqual(int(raw[0]) & 0xf000, 0)
         for value in (0.,-1.,math.nan,math.inf):
             with self.assertRaises(ValueError): global_bits(torch.tensor(value))
+
+    def test_dot8_shared_exponent_alignment(self):
+        x=torch.zeros(2,8,dtype=torch.bfloat16)
+        x[:,0]=1;x[:,1]=-1;x[0,2]=2**-15;x[1,2]=3*2**-16
+        q=torch.ones(1,8,dtype=torch.bfloat16)
+        self.assertTrue(torch.equal(tensor_dot8(x,q),torch.tensor([[0.],[2**-14]])))
 
     def test_zero_groups_codegen_and_original_packed_payload(self):
         for spec in ('mxfp4','nvfp4'):

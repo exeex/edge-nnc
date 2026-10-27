@@ -1,7 +1,8 @@
 """Weight-only MXFP4/NVFP4: E2M1 codes and native byte block scales.
 
 Groups are K32/E8M0 for MXFP4, K16/E4M3FN plus one FP32 tensor scale for
-NVFP4. Groups are dense; only the entire payload has final 16-byte padding.
+NVFP4. Global is rounded to BF16 in an FP32 container before local quantization.
+NVFP4 local*global forms BF20 before the per-tile dot scale. Groups are dense; only the entire payload has final 16-byte padding.
 """
 import struct
 import torch
@@ -47,6 +48,7 @@ def quantize(weight, spec):
     else:
         amax = float(maximum.max())
         global_scale = torch.tensor(amax / (448 * 6) if amax else 1., dtype=torch.float32)
+        global_scale = rounded_global(global_scale)
         codes = (maximum / (6 * global_scale)).clamp(0, 448).to(torch.float8_e4m3fn).view(torch.uint8)
     scale = decode_scales(codes, spec) * global_scale
     normalized = torch.where(scale.unsqueeze(-1) != 0, blocks / scale.unsqueeze(-1), torch.zeros_like(blocks))
@@ -74,21 +76,72 @@ def pack_slots(q, codes, spec):
     return bytes(payload)
 
 
-def global_bits(value):
+def rounded_global(value):
     if value.numel() != 1 or value.dtype != torch.float32 or not torch.isfinite(value).all() or float(value) <= 0:
         raise ValueError('NVFP4 global scale must be one positive finite FP32')
-    return struct.unpack('<I', struct.pack('<f', float(value)))[0]
+    result = value.to(torch.bfloat16).float()
+    if not torch.isfinite(result).all() or float(result) <= 0:
+        raise ValueError('NVFP4 global scale must round to positive finite BF16')
+    return result
+
+
+def global_bits(value):
+    return struct.unpack('<I', struct.pack('<f', float(rounded_global(value))))[0]
+
+
+def combined_scales(codes, global_scale):
+    # 8-bit BF16 significand times 4-bit E4M3 significand is exact in BF20.
+    result = decode_scales(codes, 'nvfp4') * rounded_global(global_scale).to(codes.device)
+    # Same normal-result FTZ boundary as the tensor arithmetic.
+    return torch.where(result.abs() < torch.finfo(torch.float32).tiny, torch.zeros_like(result), result)
+
+
+def tensor_dot8(x, q):
+    """E3 dot8: RNE each 16-bit product into the shared exponent domain."""
+    a = x.to(torch.bfloat16).contiguous().view(torch.int16).to(torch.int64) & 0xffff
+    b = q.to(torch.bfloat16).contiguous().view(torch.int16).to(torch.int64) & 0xffff
+    # Tensor ingress maps NaN to zero and infinity to the largest finite BF16.
+    def sanitize(raw):
+        magnitude = raw & 0x7fff
+        raw = torch.where(magnitude > 0x7f80, torch.zeros_like(raw), raw)
+        return torch.where(magnitude == 0x7f80, (raw & 0x8000) | 0x7f7f, raw)
+    a, b = sanitize(a)[:,None,:], sanitize(b)[None,:,:]
+    ae, be = (a >> 7) & 255, (b >> 7) & 255
+    product = (((ae != 0).long() << 7) | (a & 127)) * (((be != 0).long() << 7) | (b & 127))
+    valid = ((a & 0x7fff) != 0) & ((b & 0x7fff) != 0)
+    exponent = torch.where(ae == 0, 1, ae) + torch.where(be == 0, 1, be) - 134
+    maximum = torch.where(valid, exponent, -512).amax(-1,keepdim=True)
+    maximum = torch.where(valid.any(-1,keepdim=True), maximum, 0)
+    shift = (maximum - exponent).clamp(0,16)
+    quotient = product >> shift
+    remainder = product & ((1 << shift)-1)
+    half = 1 << (shift-1).clamp(min=0)
+    increment = (shift != 0) & ((remainder > half) | ((remainder == half) & ((quotient & 1) != 0)))
+    aligned = torch.where(valid & (maximum-exponent < 17), quotient+increment, 0)
+    aligned = torch.where(((a^b) & 0x8000) != 0, -aligned, aligned)
+    dot = torch.ldexp(aligned.sum(-1).float(), maximum.squeeze(-1).int()-134)
+    return round_bf22(dot)
 
 
 def reference(x, q, codes, global_scale, spec):
     size = group_k(spec)
-    scales = decode_scales(codes, spec).to(x.device)
+    scales = (combined_scales(codes, global_scale) if spec == 'nvfp4' else
+              decode_scales(codes, spec)).to(x.device)
     result = torch.zeros((*x.shape[:-1], q.shape[0]), device=x.device)
     for offset in range(0, q.shape[1], 8):
-        dot = round_bf22(x[..., offset:offset+8].float() @ q[:, offset:offset+8].float().T)
-        result = round_bf22(result + round_bf22(dot * scales[:, offset // size]))
+        dot = tensor_dot8(x[..., offset:offset+8], q[:, offset:offset+8])
+        if spec == 'nvfp4':
+            # Exact 26-bit significand product, rounded directly to BF22.
+            product = dot.double() * scales[:, offset // size].double()
+            mantissa, exponent = torch.frexp(product)
+            scaled = torch.ldexp(torch.round(mantissa * (1 << 14)), exponent - 14).float()
+            scaled = torch.where(scaled.abs() < torch.finfo(torch.float32).tiny,
+                                 torch.zeros_like(scaled), scaled)
+        else:
+            scaled = round_bf22(dot * scales[:, offset // size])
+        result = round_bf22(result + scaled)
     global_bits(global_scale)
-    return (result * global_scale.to(x.device)).to(torch.bfloat16).to(x.dtype)
+    return result.to(torch.bfloat16).to(x.dtype)
 
 
 @torch.library.custom_op('nnedge::linear_mxfp4', mutates_args=())

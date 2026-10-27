@@ -210,7 +210,7 @@ class LinearMicroscaleLowerer(OpLowerer):
             raise SystemExit('microscale Linear requires rank-two operands')
         n,k = w.shape
         slot_bytes = 272 if self.spec == 'mxfp4' else 144
-        output_bytes = 2 if self.spec == 'mxfp4' else 4
+        output_bytes = 2
         if min(n,k,x.shape[0]) <= 0 or n%8 or k%size or x.shape[1] != k:
             raise SystemExit('microscale Linear shape/group mismatch')
         if ((2*k+63)//64*64 + (output_bytes*n+63)//64*64 + 128 + 8*slot_bytes) > 32768:
