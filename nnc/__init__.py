@@ -6,3 +6,14 @@ def compile(model, example_args, *, out_dir="build/generated", save_reference=Fa
     """Generate C++ and packed weights for an eval model and example inputs."""
     from nnc.compiler import compile as compile_to_cpp
     return compile_to_cpp(model, example_args, out_dir=out_dir, save_reference=save_reference)
+
+
+# Legacy smoke models still define their own BF16 custom ops. Register the
+# reusable transformer ops only when a transformer module is requested.
+def __getattr__(name):
+    if name in {"Linear", "RMSNorm", "RoPE", "KVCacheUpdate", "Attention"}:
+        from importlib import import_module
+        value = getattr(import_module("nnc.transformer"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

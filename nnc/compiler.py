@@ -78,7 +78,7 @@ def main() -> None:
     parser.add_argument(
         "--model-file",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "example" / "llama" / "model" / "llama3_source.py",
+        default=Path(__file__).resolve().parents[1] / "example" / "llama" / "model.py",
     )
     args = parser.parse_args()
 

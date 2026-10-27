@@ -14,7 +14,7 @@ import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_DIR = REPO_ROOT / "nnc/test"
-EXAMPLE_MODEL = REPO_ROOT / "example/llama/model/llama3_source.py"
+EXAMPLE_MODEL = REPO_ROOT / "example/llama/model.py"
 DEFAULT_OUT = REPO_ROOT / "example/llama/build/harness"
 
 
@@ -94,7 +94,7 @@ def main() -> None:
     if test_llama.read_bytes() != EXAMPLE_MODEL.read_bytes():
         raise SystemExit(
             "nnc/test/llama3_source.py is out of sync with "
-            "example/llama/model/llama3_source.py"
+            "example/llama/model.py"
         )
     models = sorted(TEST_DIR.glob("smoke_*.py"))
     models.append(test_llama)

@@ -89,25 +89,25 @@ class SmokeTransformerPrefix(nn.Module):
             "post_kv_norm_x",
         }:
             attention = self.block.attention
-            xq = torch.ops.nnedge.linear(norm, attention.wq_weight)
+            xq = attention.wq(norm)
             if self.stage == "xq":
                 return xq
-            xk = torch.ops.nnedge.linear(norm, attention.wk_weight)
+            xk = attention.wk(norm)
             if self.stage == "xk":
                 return xk
-            xv = torch.ops.nnedge.linear(norm, attention.wv_weight)
+            xv = attention.wv(norm)
             if self.stage == "xv":
                 return xv
             if self.stage == "post_qkv_norm_x":
                 return self.block.ffn_norm(x)
-            xq, xk = torch.ops.nnedge.rope(xq, xk, start_pos)
+            xq, xk = attention.rope(xq, xk, start_pos)
             if self.stage == "rope_xq":
                 return xq
             if self.stage == "rope_xk":
                 return xk
             if self.stage == "post_rope_norm_x":
                 return self.block.ffn_norm(x)
-            keys, values = torch.ops.nnedge.kv_cache_update(xk, xv, start_pos)
+            keys, values = attention.kv_cache(xk, xv, start_pos)
             if self.stage == "keys":
                 return keys
             if self.stage == "values":
@@ -122,7 +122,7 @@ class SmokeTransformerPrefix(nn.Module):
                 return torch.ops.nnedge.matmul(prob, values)
             if self.stage == "post_kv_norm_x":
                 return self.block.ffn_norm(x)
-            fused = torch.ops.nnedge.attention(xq, keys, values, mask_or_params)
+            fused = attention.attend(xq, keys, values, mask_or_params)
             if self.stage == "fused_attention":
                 return fused
             return self.block.ffn_norm(fused)
@@ -145,15 +145,15 @@ class SmokeTransformerPrefix(nn.Module):
         if self.stage == "ffn_norm":
             return ffn_norm
 
-        w1 = torch.ops.nnedge.linear(ffn_norm, self.block.feed_forward.w1_weight)
+        w1 = self.block.feed_forward.w1(ffn_norm)
         if self.stage == "w1":
             return w1
 
-        w3 = torch.ops.nnedge.linear(ffn_norm, self.block.feed_forward.w3_weight)
+        w3 = self.block.feed_forward.w3(ffn_norm)
         if self.stage == "w3":
             return w3
 
-        silu = torch.nn.functional.silu(w1)
+        silu = self.block.feed_forward.silu(w1)
         if self.stage == "silu":
             return silu
 
@@ -161,7 +161,7 @@ class SmokeTransformerPrefix(nn.Module):
         if self.stage == "gated":
             return gated
 
-        ffn = torch.ops.nnedge.linear(gated, self.block.feed_forward.w2_weight)
+        ffn = self.block.feed_forward.w2(gated)
         if self.stage == "ffn":
             return ffn
         if self.stage != "full":

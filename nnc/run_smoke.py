@@ -15,9 +15,8 @@ import subprocess
 import sys
 
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = REPO_ROOT / "example/llama/model/llama3_source.py"
+DEFAULT_MODEL = REPO_ROOT / "example/llama/model.py"
 DEFAULT_MAIN = REPO_ROOT / "example/llama/src/smoke_main.cpp"
 
 if str(REPO_ROOT) not in sys.path:
@@ -232,8 +231,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-file", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--main-file", type=Path, default=DEFAULT_MAIN)
-    parser.add_argument("--artifacts-dir", type=Path,
-                        help="reuse saved headers/input/weight/expected.bin without importing PyTorch")
+    generation = parser.add_mutually_exclusive_group()
+    generation.add_argument("--generated-dir", type=Path,
+                            help="write generated headers and payloads to this directory")
+    generation.add_argument("--artifacts-dir", type=Path,
+                            help="reuse saved headers/input/weight/expected.bin without importing PyTorch")
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--profile", action="store_true")
@@ -284,7 +286,7 @@ def main() -> None:
             expected = struct.unpack(f"<{len(raw)//2}H", raw)
         print(f"REUSE {generated_dir} (no PyTorch export or quantization)")
     else:
-        generated_dir = build_dir / "generated"
+        generated_dir = args.generated_dir or build_dir / "generated"
         expected = generate(args.model_file, generated_dir)
     build(args, generated_dir, build_dir)
     print(f"BUILT {build_dir / 'llama.elf'}")

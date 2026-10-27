@@ -41,3 +41,22 @@ multiples of eight; M may have a tail. Matmul implements the head-aware
 normal/transposed layouts used by NNC, with per-head K/N multiples of eight
 and a 32 KiB staging limit. Unsupported shapes are rejected during lowering.
 These contracts do not cover general PyTorch broadcasting or arbitrary K/N tails.
+
+
+## Reusable transformer modules
+
+`from nnc import Linear, RMSNorm, RoPE, KVCacheUpdate, Attention` provides
+modules over the BF16 transformer custom ops in `nnc/ops.py`. `Linear` wraps an
+existing `torch.nn.Linear` while retaining its parameters and optional bias.
+The other modules compose the existing normalization, rotation, prefill KV
+pass-through, and unscaled/unmasked attention semantics. Registration is lazy
+so older standalone smoke models can continue defining their own custom ops.
+
+`example/llama/model.py` imports these modules and calls `nnc.compile(...)` in
+its `__main__`. `example/llama/main.cpp` is the minimal generated-forward main.
+The model's initialization retains the original deterministic parameter and
+input values. The legacy model path and `nnc/test/llama3_source.py` are links
+to this one source. The consuming workspace tracks generated Llama headers
+beside its main but ignores the larger binary payloads; its runner regenerates
+those on each run with `--generated-dir`. The four small quantized Linear
+examples continue to replay their Git-tracked headers and binary snapshots.
