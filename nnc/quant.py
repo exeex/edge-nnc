@@ -1,6 +1,7 @@
-"""Named K32 quant specs: BF16 scales and exact BF16 value carriers.
+"""K32 byte weights: native source scales, BF16 scale stand-in for stype=0.
 
-Q8_0 here describes the E3 runtime spec, not the GGUF FP16-scale file layout.
+Q8_0 preserves reference INT8 codes before adapting FP16 scales to BF16.
+All three specs store eight 16-bit scales and four 8x8 tiles per 272-byte slot.
 """
 import struct
 import torch
@@ -10,6 +11,7 @@ FP8_DTYPES = {
     'fp8_e4m3fn': torch.float8_e4m3fn,
     'fp8_e5m2': torch.float8_e5m2,
 }
+SCALE_DTYPE = torch.bfloat16  # Current stype=0; independent of weight encoding.
 
 
 def _validate_shape(q, scale=None):
@@ -19,35 +21,55 @@ def _validate_shape(q, scale=None):
         raise ValueError('quant Linear requires scales[N,K/32]')
 
 
-def quantize(weight, spec):
-    """Per-output K32 max-absolute scaling; serialize with BF16 scales."""
+def quantize_source(weight, spec):
+    """Return exact BF16 code carriers and source-format K32 scales.
+
+    Q8_0: FP32 max/127 normalization, ties away from zero, FP16 scale storage.
+    FP8: BF16 block-scale normalization and finite saturated FP8 conversion.
+    No spec has a zero-point. Scale adaptation must not re-quantize the codes.
+    """
     _validate_shape(weight)
     w = weight.detach().cpu().float()
     if not torch.isfinite(w).all():
         raise ValueError('quant Linear weights must be finite')
-    limit = 127. if spec == 'q8_0' else torch.finfo(FP8_DTYPES[spec]).max
     blocks = w.reshape(w.shape[0], -1, 32)
     maximum = blocks.abs().amax(-1)
-    scale = (maximum / limit).to(torch.bfloat16)
-    scale = torch.where(maximum == 0, torch.ones_like(scale), scale)
-    if not torch.isfinite(scale).all() or (scale <= 0).any():
-        raise ValueError('scale must be representable as positive finite BF16')
-    normalized = blocks / scale.float().unsqueeze(-1)
     if spec == 'q8_0':
-        q = normalized.round().clamp(-128, 127)
+        delta = maximum / 127.
+        inverse = torch.where(delta != 0, 1 / delta, torch.zeros_like(delta))
+        normalized = blocks * inverse.unsqueeze(-1)
+        magnitude = normalized.abs()
+        integral = magnitude.floor()
+        # Adding .5 in FP32 first can promote a value just below a tie.
+        q = (integral + ((magnitude - integral) >= .5)).copysign(normalized)
+        scale = delta.to(torch.float16)
     else:
+        limit = torch.finfo(FP8_DTYPES[spec]).max
+        scale = (maximum / limit).to(torch.bfloat16)
+        scale = torch.where(maximum == 0, torch.ones_like(scale), scale)
+        if (scale <= 0).any():
+            raise ValueError('nonzero FP8 group scale must be representable as positive BF16')
+        normalized = blocks / scale.float().unsqueeze(-1)
         q = normalized.clamp(-limit, limit).to(FP8_DTYPES[spec]).float()
+    if not torch.isfinite(scale).all():
+        raise ValueError('scale must be representable in its source format')
     return q.reshape(w.shape).to(torch.bfloat16), scale
+
+
+def quantize(weight, spec):
+    """Adapt source scales to current stype=0, retaining source codes unchanged."""
+    q, scale = quantize_source(weight, spec)
+    return q, scale.to(SCALE_DTYPE)
 
 
 def pack_slots(q, scale, spec):
     """Eight BF16 scales followed by four output-major 8x8 byte tiles."""
     _validate_shape(q, scale)
-    if q.dtype != torch.bfloat16 or scale.dtype != torch.bfloat16:
+    if q.dtype != torch.bfloat16 or scale.dtype != SCALE_DTYPE:
         raise ValueError('quant values and scales must be BF16 carriers')
     value, s = q.detach().cpu(), scale.detach().cpu()
-    if not torch.isfinite(value).all() or not torch.isfinite(s).all() or (s <= 0).any():
-        raise ValueError('quant values must be finite and BF16 scales positive finite')
+    if not torch.isfinite(value).all() or not torch.isfinite(s).all() or (s < 0).any():
+        raise ValueError('quant values must be finite and BF16 scales nonnegative finite')
     if spec == 'q8_0':
         if (value < -128).any() or (value > 127).any() or not torch.equal(value, value.round()):
             raise ValueError('Q8_0 carrier must contain exact signed INT8 values')

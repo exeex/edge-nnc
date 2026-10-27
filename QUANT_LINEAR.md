@@ -59,13 +59,23 @@ root so the local `nnc` package is importable.
 The earlier `(x,q,scale)` custom-op signatures remain supported for explicit
 format/precision fixtures. `nnc.fp4.quantize(weight)` produces exact E2M1
 values in a BF16 carrier and BF16 scales. `nnc.quant.quantize(weight, spec)`
-does the same for `q8_0`, `fp8_e4m3fn`, or `fp8_e5m2`. These helpers use
-per-group max-absolute scaling rounded to BF16, then nearest INT8 or native
-PyTorch FP8 conversion. Zero groups use scale one. INT8 uses a scale
-denominator of 127 and clamps to [-128,127]; FP8 normalizes to the selected
-dtype's maximum finite magnitude and clamps before conversion. The compiler
-rejects nonfinite or inexact explicit carriers and requires positive finite
-BF16 scales.
+does the same for `q8_0`, `fp8_e4m3fn`, or `fp8_e5m2`.
+`nnc.quant.quantize_source(weight, spec)` separates source code generation
+from the current scale encoding:
+
+- Q8_0 uses the FP32 K32 maximum/127 scale to generate signed INT8 codes,
+  with ties rounded away from zero, then stores the source scale in FP16.
+  An all-zero group has zero codes and zero scale.
+- Both scaled FP8 policies use K32 max-absolute BF16 scales, normalize to the
+  selected dtype's maximum finite magnitude, and use finite saturated native
+  PyTorch FP8 conversion. All-zero FP8 groups use scale one.
+- `quantize` adapts source scales to the BF16 stand-in for current `stype=0`,
+  preserving the codes unchanged. Q8_0 scale conversion may change numerical
+  values, but never triggers re-quantization of its INT8 codes.
+
+The compiler rejects nonfinite or inexact explicit carriers and requires
+nonnegative finite BF16 scales for these three byte-weight specs. Zero scale
+is valid, including Q8_0 zero blocks. FP4 keeps its existing quantizer rules.
 
 Export reads the named custom op; shared quant lowering packs the static
 parameters and codegen emits the same named `nnedge::op::linear_*` call.
@@ -100,10 +110,20 @@ followed immediately by four output-major 8x8 weight tiles. FP4 packs two
 values per byte (earlier value in the low nibble); INT8 and FP8 use one byte
 per value. These layouts require no tail padding at the default K32 group size.
 
-`linear_q8_0` is the E3 Q8_0-style runtime spec. GGUF Q8_0 files use FP16 scales
-and a different layout; they require conversion to BF16 scales and E3 tile
-order. This quantizer is not a byte-identical implementation of llama.cpp's
-quantizer or a GGUF importer.
+Q8_0, E4M3FN and E5M2 all use 8 x 16-bit scales plus 256 one-byte weights:
+272 bytes per 8 channels x K32, or 8.5 stored bits/weight. Scale bits and
+weight-code bits have ratio 1:16. Each channel's scale is shared across its
+four K8 tiles; no scale is duplicated per tile and no zero-point is stored.
+The layout is a reversible permutation of eight `[scale16, codes32]` row
+blocks with no per-slot padding. This contract requires N%8=0 and K%32=0.
+
+BF16 is the temporary 16-bit scale interpretation, independent of the weight
+code format. Python's `SCALE_DTYPE` and the C++ byte-weight scale-type constant
+identify this current choice. Native FP16 `stype` will need matched hardware,
+packer, reference and runtime support; the grouping and tile order can remain
+unchanged. In particular, original GGUF FP16 scale bits cannot yet be fed
+directly to `stype=0` as though they encoded BF16 values. No GGUF importer is
+provided here, and BF22 GEMM rounding is not guaranteed to match llama.cpp.
 
 ## Regression ownership
 

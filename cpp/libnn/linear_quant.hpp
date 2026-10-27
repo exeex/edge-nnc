@@ -2,12 +2,17 @@
 #include "linear_weight_slots.hpp"
 
 namespace nnedge {
-// Default E3 quant specs: K32, eight per-output-lane BF16 scales, four
-// output-major 8x8 tiles. These are runtime layouts, not file-format decoders.
+// K32, eight per-output-lane 16-bit scales, four output-major 8x8 tiles.
+// BF16 is the current scale stand-in (stype=0). Byte-weight packs are all
+// 272 bytes / 256 weights = 8.5 bits/weight; scale:weight bits = 1:16.
+// These are runtime layouts, not file-format decoders.
+constexpr unsigned kQuantByteWeightScaleType = 0;
 using FP4WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP4, 0, 4, 8>;
-using Q8_0WeightPack = WeightPack<EDGE_TENSOR_WTYPE_INT8, 0, 4, 8>;
-using FP8E4M3FNWeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E4M3FN, 0, 4, 8>;
-using FP8E5M2WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E5M2, 0, 4, 8>;
+using Q8_0WeightPack = WeightPack<EDGE_TENSOR_WTYPE_INT8, kQuantByteWeightScaleType, 4, 8>;
+using FP8E4M3FNWeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E4M3FN, kQuantByteWeightScaleType, 4, 8>;
+using FP8E5M2WeightPack = WeightPack<EDGE_TENSOR_WTYPE_FP8_E5M2, kQuantByteWeightScaleType, 4, 8>;
+static_assert(sizeof(Q8_0WeightPack) == 272 && sizeof(FP8E4M3FNWeightPack) == 272
+              && sizeof(FP8E5M2WeightPack) == 272, "K32 byte-weight storage contract");
 
 namespace op {
 using FP4SlotLayout = WeightSlotLayout<EDGE_TENSOR_WTYPE_FP4>;
